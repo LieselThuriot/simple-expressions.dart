@@ -1,0 +1,12 @@
+name: simple_expressions
+description: A small, dependency-free expression evaluator for Dart and Flutter.
+version: 1.0.0
+homepage: https://github.com/LieselThuriot/simple-expressions
+repository: https://github.com/LieselThuriot/simple-expressions
+issue_tracker: https://github.com/LieselThuriot/simple-expressions/issues
+
+environment:
+  sdk: ^3.0.0
+
+dev_dependencies:
+  test: ^1.24.0
