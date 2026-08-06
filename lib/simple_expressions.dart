@@ -3,7 +3,7 @@ library simple_expressions;
 
 import 'dart:collection';
 
-typedef _EvaluatorFunction = _Value Function(_ExpressionModel model);
+typedef _EvaluatorFunction = _Value Function(Map? model);
 
 /// The error raised when an expression cannot be parsed.
 class ExpressionParseException extends FormatException {
@@ -26,7 +26,7 @@ class Expression {
 
   Expression(Object expression) {
     if (expression is bool) {
-      _evaluator = _Compiled.constant(_Value.boolean(expression));
+      _evaluator = _Compiled.constant(expression ? _trueValue : _falseValue);
     } else if (expression is String) {
       final normalized = expression.trim();
       if (normalized.isEmpty) {
@@ -41,11 +41,15 @@ class Expression {
   late final _Compiled _evaluator;
 
   /// Evaluates the expression and returns its raw value.
+  ///
+  /// Arrays read from the model are returned as the model's live lists,
+  /// not defensive copies.
   Object? evaluateValue(Object? model) =>
-      _evaluator(_ExpressionModel(model)).toPublicValue();
+      _evaluator(model is Map ? model : null).toPublicValue();
 
   /// Evaluates the expression using JavaScript-like truthiness.
-  bool evaluate(Object? model) => _evaluator(_ExpressionModel(model)).isTruthy;
+  bool evaluate(Object? model) =>
+      _evaluator(model is Map ? model : null).isTruthy;
 }
 
 /// Parses expression text into a reusable evaluator.
@@ -69,7 +73,7 @@ class SimpleExpressions {
 
   /// Returns a cached reusable expression when caching is enabled.
   static Expression get(Object expression) {
-    final key = '$expression';
+    final key = expression is String ? expression : '$expression';
     if (_enabledCaches) {
       final cached = _expressionCache[key];
       if (cached != null) return cached;
@@ -113,18 +117,18 @@ class SimpleExpressions {
     _trimCache(_expressionCache);
   }
 
+  // Callers pass already-trimmed input.
   static _Compiled _getParsedExpression(String expression) {
-    final normalized = expression.trim();
-    if (normalized.isEmpty) {
+    if (expression.isEmpty) {
       throw ExpressionParseException('formatting', 0);
     }
     if (_enabledCaches) {
-      final cached = _parseCache[normalized];
+      final cached = _parseCache[expression];
       if (cached != null) return cached;
     }
 
-    final result = _ExpressionParser(normalized).parse();
-    if (_enabledCaches) _setCacheValue(_parseCache, normalized, result);
+    final result = _ExpressionParser(expression).parse();
+    if (_enabledCaches) _setCacheValue(_parseCache, expression, result);
     return result;
   }
 
@@ -183,29 +187,29 @@ class _Tokenizer {
     }
 
     final start = index;
-    final character = source[index];
-    switch (character) {
-      case '(':
+    final code = source.codeUnitAt(index);
+    switch (code) {
+      case 0x28: // (
         index++;
-        current = _Token(_TokenKind.openParen, character, index);
+        current = _Token(_TokenKind.openParen, '(', index);
         return;
-      case ')':
+      case 0x29: // )
         index++;
-        current = _Token(_TokenKind.closeParen, character, index);
+        current = _Token(_TokenKind.closeParen, ')', index);
         return;
-      case ',':
+      case 0x2c: // ,
         index++;
-        current = _Token(_TokenKind.comma, character, index);
+        current = _Token(_TokenKind.comma, ',', index);
         return;
-      case '[':
+      case 0x5b: // [
         index++;
-        current = _Token(_TokenKind.openBracket, character, index);
+        current = _Token(_TokenKind.openBracket, '[', index);
         return;
-      case ']':
+      case 0x5d: // ]
         index++;
-        current = _Token(_TokenKind.closeBracket, character, index);
+        current = _Token(_TokenKind.closeBracket, ']', index);
         return;
-      case '#':
+      case 0x23: // #
         index++;
         _readDelimitedToken();
         if (index == start + 1) _fail('missing model reference');
@@ -215,16 +219,19 @@ class _Tokenizer {
           index,
         );
         return;
-      case '`':
-      case '"':
-      case "'":
-        _readString(character);
+      case 0x60: // `
+      case 0x22: // "
+      case 0x27: // '
+        _readString(code);
         return;
     }
 
-    if (_isIdentifierStart(character)) {
+    if (_isIdentifierCode(code)) {
       index++;
-      while (index < source.length && _isIdentifierPart(source[index])) index++;
+      while (index < source.length &&
+          _isIdentifierCode(source.codeUnitAt(index))) {
+        index++;
+      }
       current =
           _Token(_TokenKind.identifier, source.substring(start, index), index);
       return;
@@ -245,31 +252,32 @@ class _Tokenizer {
 
   void _readDelimitedToken() {
     while (index < source.length) {
-      final character = source[index];
-      if (character == '(' ||
-          character == ')' ||
-          character == ',' ||
-          character == '[' ||
-          character == ']' ||
-          source.codeUnitAt(index) <= 32) {
+      final code = source.codeUnitAt(index);
+      if (code == 0x28 || // (
+          code == 0x29 || // )
+          code == 0x2c || // ,
+          code == 0x5b || // [
+          code == 0x5d || // ]
+          code <= 32) {
         return;
       }
       index++;
     }
   }
 
-  void _readString(String quote) {
+  void _readString(int quote) {
     final start = index + 1;
     index++;
     var backslashCount = 0;
     while (index < source.length) {
-      final character = source[index];
-      if (character == '\\') {
+      final code = source.codeUnitAt(index);
+      if (code == 0x5c) {
+        // backslash
         backslashCount++;
         index++;
         continue;
       }
-      if (character == quote && backslashCount.isEven) {
+      if (code == quote && backslashCount.isEven) {
         current = _Token(
             _TokenKind.string, source.substring(start, index), index + 1);
         index++;
@@ -281,13 +289,8 @@ class _Tokenizer {
     _fail('unterminated string');
   }
 
-  static bool _isIdentifierStart(String character) {
-    final code = character.codeUnitAt(0);
-    return code >= 65 && code <= 90 || code >= 97 && code <= 122;
-  }
-
-  static bool _isIdentifierPart(String character) =>
-      _isIdentifierStart(character);
+  static bool _isIdentifierCode(int code) =>
+      code >= 65 && code <= 90 || code >= 97 && code <= 122;
 
   Never _fail(String message) => throw ExpressionParseException(message, index);
 }
@@ -315,19 +318,23 @@ class _ExpressionParser {
         return _Compiled.constant(_Value.number(value));
       case _TokenKind.reference:
         final path = _tokenizer.value;
-        _validateReference(path);
+        final segments = _validateReference(path);
         _tokenizer.next();
-        return _Compiled((_ExpressionModel model) => model.resolve(path));
+        if (segments.length == 1) {
+          return _Compiled((model) => _resolveSingle(model, path));
+        }
+        return _Compiled((model) => _resolvePath(model, path, segments));
       case _TokenKind.identifier:
         final identifier = _tokenizer.value;
         _tokenizer.next();
-        if (identifier.toLowerCase() == 'true') {
-          return _Compiled.constant(_Value.boolean(true));
+        final normalized = identifier.toLowerCase();
+        if (normalized == 'true') {
+          return _Compiled.constant(_trueValue);
         }
-        if (identifier.toLowerCase() == 'false') {
-          return _Compiled.constant(_Value.boolean(false));
+        if (normalized == 'false') {
+          return _Compiled.constant(_falseValue);
         }
-        return _parseCall(identifier);
+        return _parseCall(identifier, normalized);
       case _TokenKind.openBracket:
         return _parseList();
       default:
@@ -351,15 +358,21 @@ class _ExpressionParser {
       _fail('expected closing bracket');
     }
     _tokenizer.next();
-    return _Compiled(
-        (model) => _Value.array(values.map((value) => value(model)).toList()));
+    final compiled = List<_Compiled>.of(values, growable: false);
+    return _Compiled((model) {
+      final items =
+          List<_Value>.filled(compiled.length, const _Value.missing());
+      for (var index = 0; index < compiled.length; index++) {
+        items[index] = compiled[index](model);
+      }
+      return _Value.array(items);
+    });
   }
 
-  _Compiled _parseCall(String operator) {
+  _Compiled _parseCall(String operator, String normalized) {
     if (_tokenizer.kind != _TokenKind.openParen) {
       _fail('invalid operator: $operator');
     }
-    final normalized = operator.toLowerCase();
     final arity = _operatorArity(normalized);
     _tokenizer.next();
     if (_tokenizer.kind == _TokenKind.closeParen) {
@@ -450,9 +463,11 @@ class _ExpressionParser {
   _Compiled _compileUnary(String operator, _Compiled inner) {
     switch (operator) {
       case 'not':
-        return _Compiled((model) => _Value.boolean(!inner(model).isTruthy));
+        return _Compiled(
+            (model) => inner(model).isTruthy ? _falseValue : _trueValue);
       case 'empty':
-        return _Compiled((model) => _Value.boolean(_isEmpty(inner(model))));
+        return _Compiled(
+            (model) => _isEmpty(inner(model)) ? _trueValue : _falseValue);
       case 'len':
         return _Compiled((model) => _length(inner(model)));
       case 'lower':
@@ -464,7 +479,8 @@ class _ExpressionParser {
       case 'trim':
         return _Compiled((model) => _trim(inner(model)));
       case 'defined':
-        return _Compiled((model) => _Value.boolean(!inner(model).isNullish));
+        return _Compiled(
+            (model) => inner(model).isNullish ? _falseValue : _trueValue);
       default:
         _fail('invalid operator: $operator');
     }
@@ -473,26 +489,26 @@ class _ExpressionParser {
   _Compiled _compileBinary(String operator, _Compiled left, _Compiled right) {
     switch (operator) {
       case 'eq':
-        return _Compiled(
-            (model) => _Value.boolean(_looseEquals(left(model), right(model))));
+        return _Compiled((model) =>
+            _looseEquals(left(model), right(model)) ? _trueValue : _falseValue);
       case 'contains':
-        return _Compiled(
-            (model) => _Value.boolean(_contains(left(model), right(model))));
+        return _Compiled((model) =>
+            _contains(left(model), right(model)) ? _trueValue : _falseValue);
       case 'startswith':
-        return _Compiled(
-            (model) => _Value.boolean(_startsWith(left(model), right(model))));
+        return _Compiled((model) =>
+            _startsWith(left(model), right(model)) ? _trueValue : _falseValue);
       case 'endswith':
-        return _Compiled(
-            (model) => _Value.boolean(_endsWith(left(model), right(model))));
+        return _Compiled((model) =>
+            _endsWith(left(model), right(model)) ? _trueValue : _falseValue);
       case 'in':
-        return _Compiled(
-            (model) => _Value.boolean(_inList(left(model), right(model))));
+        return _Compiled((model) =>
+            _inList(left(model), right(model)) ? _trueValue : _falseValue);
       case 'gt':
-        return _Compiled(
-            (model) => _Value.boolean(_compare(left(model), right(model)) > 0));
+        return _Compiled((model) =>
+            _compare(left(model), right(model)) > 0 ? _trueValue : _falseValue);
       case 'lt':
-        return _Compiled(
-            (model) => _Value.boolean(_compare(left(model), right(model)) < 0));
+        return _Compiled((model) =>
+            _compare(left(model), right(model)) < 0 ? _trueValue : _falseValue);
       case 'match':
         return _compileMatch(left, right);
       default:
@@ -506,17 +522,19 @@ class _ExpressionParser {
         constant.kind == _ValueKind.string &&
         constant.isTruthy) {
       final regex = RegExp(constant.value as String);
-      return _Compiled(
-          (model) => _Value.boolean(regex.hasMatch(_regexInput(value(model)))));
+      return _Compiled((model) =>
+          regex.hasMatch(_regexInput(value(model))) ? _trueValue : _falseValue);
     }
     return _Compiled((model) {
       final runtimePattern = pattern(model);
       if (runtimePattern.kind != _ValueKind.string ||
           !runtimePattern.isTruthy) {
-        return _Value.boolean(false);
+        return _falseValue;
       }
-      final regex = RegExp(runtimePattern.value as String);
-      return _Value.boolean(regex.hasMatch(_regexInput(value(model))));
+      final regex = _runtimeRegExp(runtimePattern.value as String);
+      return regex.hasMatch(_regexInput(value(model)))
+          ? _trueValue
+          : _falseValue;
     });
   }
 
@@ -525,31 +543,31 @@ class _ExpressionParser {
       case 'or':
         return _Compiled((model) {
           for (final value in values) {
-            if (value(model).isTruthy) return _Value.boolean(true);
+            if (value(model).isTruthy) return _trueValue;
           }
-          return _Value.boolean(false);
+          return _falseValue;
         });
       case 'and':
         return _Compiled((model) {
           for (final value in values) {
-            if (!value(model).isTruthy) return _Value.boolean(false);
+            if (!value(model).isTruthy) return _falseValue;
           }
-          return _Value.boolean(true);
+          return _trueValue;
         });
       case 'concat':
         if (values.every((value) => value.constantValue != null)) {
-          var result = '';
+          final buffer = StringBuffer();
           for (final value in values) {
-            result = _concatValue(_Value.string(result), value.constantValue!);
+            _writeConcatValue(buffer, value.constantValue!);
           }
-          return _Compiled.constant(_Value.string(result));
+          return _Compiled.constant(_Value.string(buffer.toString()));
         }
         return _Compiled((model) {
-          var result = '';
+          final buffer = StringBuffer();
           for (final value in values) {
-            result = _concatValue(_Value.string(result), value(model));
+            _writeConcatValue(buffer, value(model));
           }
-          return _Value.string(result);
+          return _Value.string(buffer.toString());
         });
       default:
         _fail('invalid operator: $operator');
@@ -571,14 +589,16 @@ class _ExpressionParser {
     }
   }
 
-  static void _validateReference(String path) {
+  static List<String> _validateReference(String path) {
     const unsafe = {'__proto__', 'constructor', 'prototype'};
-    for (final segment in path.split('.')) {
+    final segments = path.split('.');
+    for (final segment in segments) {
       if (segment.isEmpty || unsafe.contains(segment)) {
         throw ExpressionParseException.withoutPosition(
             'invalid model reference: #$path');
       }
     }
+    return segments;
   }
 
   Never _fail(String message) =>
@@ -595,10 +615,14 @@ class _Compiled {
   final _EvaluatorFunction function;
   final _Value? constantValue;
 
-  _Value call(_ExpressionModel model) => function(model);
+  _Value call(Map? model) => function(model);
 }
 
 enum _ValueKind { missing, nullValue, boolean, number, string, array, object }
+
+const _Value _trueValue = _Value.boolean(true);
+const _Value _falseValue = _Value.boolean(false);
+const _Value _zeroValue = _Value(_ValueKind.number, 0.0);
 
 class _Value {
   const _Value(this.kind, this.value);
@@ -608,7 +632,10 @@ class _Value {
   const _Value.boolean(bool value) : this(_ValueKind.boolean, value);
   _Value.number(num value) : this(_ValueKind.number, value.toDouble());
   const _Value.string(String value) : this(_ValueKind.string, value);
-  const _Value.array(List<_Value> value) : this(_ValueKind.array, value);
+
+  /// Arrays hold either the model's raw list (items converted lazily on
+  /// access) or an already-converted `List<_Value>` for literal lists.
+  const _Value.array(List value) : this(_ValueKind.array, value);
   const _Value.object(Map<Object?, Object?> value)
       : this(_ValueKind.object, value);
 
@@ -646,53 +673,57 @@ class _Value {
       case _ValueKind.string:
         return value;
       case _ValueKind.array:
-        return (value as List<_Value>)
-            .map((item) => item.toPublicValue())
-            .toList();
+        final items = value as List;
+        if (items is List<_Value>) {
+          return items.map((item) => item.toPublicValue()).toList();
+        }
+        return items;
       case _ValueKind.object:
         return value;
     }
   }
 }
 
-class _ExpressionModel {
-  _ExpressionModel(Object? model) : root = model is Map ? model : null;
-
-  final Map? root;
-
-  _Value resolve(String path) {
-    final model = root;
-    if (model == null) return const _Value.missing();
-    final segments = path.split('.');
-    if (segments.length == 1) {
-      return model.containsKey(path)
-          ? _fromPublic(model[path])
-          : const _Value.missing();
-    }
-    if (model.containsKey(path)) return _fromPublic(model[path]);
-
-    Object? current = model;
-    for (final segment in segments) {
-      if (current is! Map || !current.containsKey(segment)) {
-        return const _Value.missing();
-      }
-      current = current[segment];
-    }
-    return _fromPublic(current);
+_Value _resolveSingle(Map? model, String key) {
+  if (model == null) return const _Value.missing();
+  final value = model[key];
+  if (value == null && !model.containsKey(key)) {
+    return const _Value.missing();
   }
+  return _fromPublic(value);
+}
+
+_Value _resolvePath(Map? model, String path, List<String> segments) {
+  if (model == null) return const _Value.missing();
+  // A member literally named the whole dotted path wins, matching upstream.
+  final dotted = model[path];
+  if (dotted != null || model.containsKey(path)) return _fromPublic(dotted);
+
+  Object? current = model;
+  for (final segment in segments) {
+    if (current is! Map) return const _Value.missing();
+    final next = current[segment];
+    if (next == null && !current.containsKey(segment)) {
+      return const _Value.missing();
+    }
+    current = next;
+  }
+  return _fromPublic(current);
 }
 
 _Value _fromPublic(Object? value) {
   if (value == null) return const _Value.nullValue();
-  if (value is bool) return _Value.boolean(value);
+  if (value is bool) return value ? _trueValue : _falseValue;
   if (value is num) return _Value.number(value);
   if (value is String) return _Value.string(value);
-  if (value is List) {
-    return _Value.array(value.map(_fromPublic).toList());
-  }
+  if (value is List) return _Value.array(value);
   if (value is Map) return _Value.object(value.cast<Object?, Object?>());
   return _Value.object(<Object?, Object?>{});
 }
+
+/// Lifts one array item into the value model; literal-list items are already
+/// `_Value`s, model-list items convert lazily here.
+_Value _arrayItem(Object? item) => item is _Value ? item : _fromPublic(item);
 
 bool _isEmpty(_Value value) =>
     value.isNullish ||
@@ -709,12 +740,12 @@ _Value _trim(_Value value) {
 }
 
 _Value _length(_Value value) {
-  if (value.isNullish) return _Value.number(0);
+  if (value.isNullish) return _zeroValue;
   if (value.kind == _ValueKind.string) {
     return _Value.number((value.value as String).length);
   }
   if (value.kind == _ValueKind.array) {
-    return _Value.number((value.value as List<_Value>).length);
+    return _Value.number((value.value as List).length);
   }
   if (value.kind == _ValueKind.object) {
     final object = value.value as Map;
@@ -737,14 +768,34 @@ bool _endsWith(_Value left, _Value right) =>
 
 bool _inList(_Value value, _Value list) {
   if (list.kind != _ValueKind.array) return false;
-  return (list.value as List<_Value>).any((item) => _looseEquals(value, item));
+  final items = list.value as List;
+  for (var index = 0; index < items.length; index++) {
+    if (_looseEquals(value, _arrayItem(items[index]))) return true;
+  }
+  return false;
 }
 
-String _concatValue(_Value current, _Value value) =>
-    (current.value as String) +
-    (value.isTruthy ? _toJavaScriptString(value) : '');
+void _writeConcatValue(StringBuffer buffer, _Value value) {
+  if (value.isTruthy) buffer.write(_toJavaScriptString(value));
+}
 
 const int _maxStructuralDepth = 64;
+
+const int _runtimePatternCacheLimit = 64;
+final Map<String, RegExp> _runtimePatterns = <String, RegExp>{};
+
+/// Compiles and caches a model-supplied `match()` pattern. Patterns come from
+/// caller data, so the cache stays bounded: cleared wholesale when full.
+RegExp _runtimeRegExp(String pattern) {
+  final cached = _runtimePatterns[pattern];
+  if (cached != null) return cached;
+  final regex = RegExp(pattern);
+  if (_runtimePatterns.length >= _runtimePatternCacheLimit) {
+    _runtimePatterns.clear();
+  }
+  _runtimePatterns[pattern] = regex;
+  return regex;
+}
 
 bool _looseEquals(_Value left, _Value right, [int depth = 0]) {
   if (left.kind == right.kind) {
@@ -782,13 +833,14 @@ bool _looseEquals(_Value left, _Value right, [int depth = 0]) {
 }
 
 bool _structuralArrayEquals(_Value left, _Value right, int depth) {
-  final leftItems = left.value as List<_Value>;
-  final rightItems = right.value as List<_Value>;
+  final leftItems = left.value as List;
+  final rightItems = right.value as List;
   if (identical(leftItems, rightItems)) return true;
   if (depth >= _maxStructuralDepth) return false;
   if (leftItems.length != rightItems.length) return false;
   for (var index = 0; index < leftItems.length; index++) {
-    if (!_looseEquals(leftItems[index], rightItems[index], depth + 1)) {
+    if (!_looseEquals(_arrayItem(leftItems[index]),
+        _arrayItem(rightItems[index]), depth + 1)) {
       return false;
     }
   }
@@ -857,9 +909,14 @@ String _toJavaScriptString(_Value value) {
     case _ValueKind.string:
       return value.value as String;
     case _ValueKind.array:
-      return (value.value as List<_Value>)
-          .map((item) => item.isNullish ? '' : _toJavaScriptString(item))
-          .join(',');
+      final items = value.value as List;
+      final buffer = StringBuffer();
+      for (var index = 0; index < items.length; index++) {
+        if (index > 0) buffer.write(',');
+        final item = _arrayItem(items[index]);
+        if (!item.isNullish) buffer.write(_toJavaScriptString(item));
+      }
+      return buffer.toString();
     case _ValueKind.object:
       return '[object Object]';
   }
