@@ -34,9 +34,24 @@ Operators are case-insensitive: `not`, `eq`, `or`, `and`, `contains`, `startswit
 
 Parsed expressions and `Expression` instances are cached by default with a FIFO limit of 1,000 entries. Use `SimpleExpressions.setCacheLimit`, `clear`, `disableCaches`, and `enableCaches` to manage caching.
 
-Missing references are represented as `null` by `evaluateValue`, but remain distinct from explicit null internally for `defined`, `empty`, and equality behavior. Numeric values are evaluated as Dart `double` values.
+Missing references are represented as `null` by `evaluateValue`. Internally a missing reference stays distinct from an explicit null, but the two are equal to each other under `eq` and behave identically for `defined` and `empty`. Numeric values are evaluated as Dart `double` values.
 
 `match` uses Dart `RegExp`, so regular-expression patterns follow Dart's regular-expression syntax rather than JavaScript's in every detail. Expressions and patterns should be treated as trusted input.
+
+## Differences from the TypeScript reference
+
+This port tracks the [TypeScript reference](https://github.com/LieselThuriot/simple-expressions) for grammar, operators, and evaluation order. It deliberately does not reproduce every JavaScript coercion quirk. The differences below are intentional and covered by the shared parity corpus in `test/parity/cases.json`.
+
+| Behaviour | TypeScript | This port |
+| --- | --- | --- |
+| String to number | `Number("")` is `0`, `"Infinity"` is a keyword | A string converts only if it parses as a number; `""` and `"   "` are `NaN` |
+| `eq` on two lists or maps | Reference equality, so `eq(#a, #b)` on equal-looking lists is false | Structural equality: same length or key set, and every pair loosely equal, to a depth of 64 |
+| `parseExpression` | Returns `(model) => value` | Returns an `Expression`; call `evaluateValue(model)` for the raw value or `evaluate(model)` for truthiness |
+| Class name | `SimpleExpression` | `Expression` |
+| Missing vs null | Distinguishable in results (`undefined` vs `null`) | Both surface as `null` from `evaluateValue`, and are equal under `eq` |
+| Model values | Any JavaScript object | Only `Map` keys resolve; a value of an unsupported runtime type is treated as an empty object |
+
+Numbers render as their shortest round-trip decimal, in plain notation for magnitudes in `[1e-6, 1e21)` and lowercase exponent notation outside it — the same rule the C# port uses, and the same output JavaScript produces for these values.
 
 ## Example
 

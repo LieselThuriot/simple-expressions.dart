@@ -10,6 +10,13 @@ class ExpressionParseException extends FormatException {
   ExpressionParseException(String message, this.position)
       : super('Invalid Expression at $position: $message', null, position);
 
+  /// Reports a failure that has no meaningful source position, matching the
+  /// upstream `Invalid Expression: {message}` format.
+  ExpressionParseException.withoutPosition(String message)
+      : position = -1,
+        super('Invalid Expression: $message');
+
+  /// The zero-based source position of the failure, or `-1` when unknown.
   final int position;
 }
 
@@ -568,7 +575,8 @@ class _ExpressionParser {
     const unsafe = {'__proto__', 'constructor', 'prototype'};
     for (final segment in path.split('.')) {
       if (segment.isEmpty || unsafe.contains(segment)) {
-        throw ExpressionParseException('invalid model reference: #$path', 0);
+        throw ExpressionParseException.withoutPosition(
+            'invalid model reference: #$path');
       }
     }
   }
@@ -736,7 +744,9 @@ String _concatValue(_Value current, _Value value) =>
     (current.value as String) +
     (value.isTruthy ? _toJavaScriptString(value) : '');
 
-bool _looseEquals(_Value left, _Value right) {
+const int _maxStructuralDepth = 64;
+
+bool _looseEquals(_Value left, _Value right, [int depth = 0]) {
   if (left.kind == right.kind) {
     switch (left.kind) {
       case _ValueKind.missing:
@@ -749,10 +759,12 @@ bool _looseEquals(_Value left, _Value right) {
       case _ValueKind.string:
         return left.value == right.value;
       case _ValueKind.array:
+        return _structuralArrayEquals(left, right, depth);
       case _ValueKind.object:
-        return identical(left.value, right.value);
+        return _structuralObjectEquals(left, right, depth);
     }
   }
+  if (left.isNullish && right.isNullish) return true;
   if (left.isNullish || right.isNullish) return false;
   if (left.kind == _ValueKind.array || left.kind == _ValueKind.object) {
     return _looseEquals(_Value.string(_toJavaScriptString(left)), right);
@@ -767,6 +779,36 @@ bool _looseEquals(_Value left, _Value right) {
     return _toNumber(left) == _toNumber(right);
   }
   return false;
+}
+
+bool _structuralArrayEquals(_Value left, _Value right, int depth) {
+  final leftItems = left.value as List<_Value>;
+  final rightItems = right.value as List<_Value>;
+  if (identical(leftItems, rightItems)) return true;
+  if (depth >= _maxStructuralDepth) return false;
+  if (leftItems.length != rightItems.length) return false;
+  for (var index = 0; index < leftItems.length; index++) {
+    if (!_looseEquals(leftItems[index], rightItems[index], depth + 1)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _structuralObjectEquals(_Value left, _Value right, int depth) {
+  final leftEntries = left.value as Map;
+  final rightEntries = right.value as Map;
+  if (identical(leftEntries, rightEntries)) return true;
+  if (depth >= _maxStructuralDepth) return false;
+  if (leftEntries.length != rightEntries.length) return false;
+  for (final key in leftEntries.keys) {
+    if (!rightEntries.containsKey(key)) return false;
+    if (!_looseEquals(_fromPublic(leftEntries[key]),
+        _fromPublic(rightEntries[key]), depth + 1)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 int _compare(_Value left, _Value right) {
@@ -794,11 +836,9 @@ double _toNumber(_Value value) {
     case _ValueKind.number:
       return value.value as double;
     case _ValueKind.string:
-      final text = (value.value as String).trim();
-      if (text.isEmpty) return 0;
-      if (text == 'Infinity' || text == '+Infinity') return double.infinity;
-      if (text == '-Infinity') return double.negativeInfinity;
-      return double.tryParse(text) ?? double.nan;
+      // A string converts only if it parses as a number; unlike JavaScript,
+      // an empty string is not zero and `Infinity` is not a keyword.
+      return double.tryParse((value.value as String).trim()) ?? double.nan;
     default:
       return double.nan;
   }
@@ -825,11 +865,48 @@ String _toJavaScriptString(_Value value) {
   }
 }
 
+const int _plainNotationMinExponent = -6;
+const int _plainNotationMaxExponent = 21;
+
+/// Renders a double as its shortest round-trip decimal, using plain notation for
+/// magnitudes in `[1e-6, 1e21)` and lowercase exponent notation outside that range.
 String _formatNumber(double value) {
   if (value.isNaN) return 'NaN';
   if (value == double.infinity) return 'Infinity';
   if (value == double.negativeInfinity) return '-Infinity';
   if (value == 0) return '0';
-  if (value == value.roundToDouble()) return value.toInt().toString();
-  return value.toString();
+
+  var text = value.toStringAsExponential();
+  final negative = text.startsWith('-');
+  if (negative) text = text.substring(1);
+
+  final separator = text.indexOf('e');
+  // toStringAsExponential normalises to a single leading digit, so the
+  // exponent is already the decimal exponent of that digit.
+  final exponent = int.parse(text.substring(separator + 1));
+  final digits = text.substring(0, separator).replaceFirst('.', '');
+
+  final formatted = exponent >= _plainNotationMinExponent &&
+          exponent < _plainNotationMaxExponent
+      ? _toPlainNotation(digits, exponent)
+      : _toExponentNotation(digits, exponent);
+
+  return negative ? '-$formatted' : formatted;
+}
+
+String _toPlainNotation(String digits, int exponent) {
+  if (exponent < 0) {
+    return '0.${'0' * (-exponent - 1)}$digits';
+  }
+  if (exponent >= digits.length - 1) {
+    return digits + '0' * (exponent - digits.length + 1);
+  }
+  return '${digits.substring(0, exponent + 1)}.${digits.substring(exponent + 1)}';
+}
+
+String _toExponentNotation(String digits, int exponent) {
+  final mantissa = digits.length == 1
+      ? digits
+      : '${digits.substring(0, 1)}.${digits.substring(1)}';
+  return '${mantissa}e${exponent < 0 ? '-' : '+'}${exponent.abs()}';
 }
