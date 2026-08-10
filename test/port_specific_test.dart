@@ -12,8 +12,14 @@ void main() {
     );
     expect(
       executeExpression({
-        'a': [1, [2, 3]],
-        'b': [1, [2, 3]],
+        'a': [
+          1,
+          [2, 3]
+        ],
+        'b': [
+          1,
+          [2, 3]
+        ],
       }, 'eq(#a, #b)'),
       isTrue,
     );

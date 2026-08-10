@@ -24,14 +24,18 @@ void main() {
       } else if (item.containsKey('truthy')) {
         expect(executeExpression(model, expression), item['truthy']);
       } else {
-        expect(_matches(item['value'], parseExpression(expression).evaluateValue(model)), isTrue);
+        expect(
+            _matches(item['value'],
+                parseExpression(expression).evaluateValue(model)),
+            isTrue);
       }
     });
   }
 }
 
 bool _matches(Object? expected, Object? actual) {
-  if (expected is num && actual is num) return expected.toDouble() == actual.toDouble();
+  if (expected is num && actual is num)
+    return expected.toDouble() == actual.toDouble();
   if (expected is List) {
     if (actual is! List || expected.length != actual.length) return false;
     for (var index = 0; index < expected.length; index++) {

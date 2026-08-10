@@ -12,15 +12,26 @@ const String arrayEqualityRule = 'eq(#AllowedRoles, #AllowedRoles2)';
 
 // Twenty distinct rules, as a rules-engine caller would have.
 const List<String> ruleSet = [
-  'eq(#Score, 8)', 'gt(#Score, 5)', 'lt(#Score, 10)', 'defined(#Score)',
-  'eq(#User.Name, "Ada")', 'startswith(#User.Name, "A")',
-  'endswith(#User.Name, "a")', 'contains(#User.Role, "engineer")',
-  'not(empty(#User.Role))', 'defined(#User.Address)',
+  'eq(#Score, 8)',
+  'gt(#Score, 5)',
+  'lt(#Score, 10)',
+  'defined(#Score)',
+  'eq(#User.Name, "Ada")',
+  'startswith(#User.Name, "A")',
+  'endswith(#User.Name, "a")',
+  'contains(#User.Role, "engineer")',
+  'not(empty(#User.Role))',
+  'defined(#User.Address)',
   'eq(#User.Address.City.Name, "Brussels")',
-  'gt(#User.Address.City.Population, 100)', 'in(#User.Role, #AllowedRoles)',
-  'eq(len(#AllowedRoles), 2)', 'empty(#Missing)',
-  'or(eq(#Score, 1), eq(#Score, 8))', 'and(defined(#User), defined(#Score))',
-  'match(#User.Name, "^A")', 'upper(#User.Name)', 'concat(#User.Name, "!")',
+  'gt(#User.Address.City.Population, 100)',
+  'in(#User.Role, #AllowedRoles)',
+  'eq(len(#AllowedRoles), 2)',
+  'empty(#Missing)',
+  'or(eq(#Score, 1), eq(#Score, 8))',
+  'and(defined(#User), defined(#Score))',
+  'match(#User.Name, "^A")',
+  'upper(#User.Name)',
+  'concat(#User.Name, "!")',
 ];
 
 Map<String, Object?> makeModel(int payloadEntries) {

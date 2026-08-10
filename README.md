@@ -1,8 +1,19 @@
 # simple_expressions
 
-A small, dependency-free Dart package for parsing and evaluating simple expressions against JSON-like model values.
+![simple-expressions logo](https://raw.githubusercontent.com/LieselThuriot/simple-expressions.sharp/main/simple-expressions.png)
+
+[![pub package](https://img.shields.io/pub/v/simple_expressions.svg)](https://pub.dev/packages/simple_expressions)
+[![license](https://img.shields.io/pub/l/simple_expressions.svg)](https://pub.dev/packages/simple_expressions/license)
+
+A Dart package for parsing and evaluating expressions against JSON-like model values.
 
 This package is licensed under the ISC License.
+
+## Install
+
+```bash
+dart pub add simple_expressions
+```
 
 ## Usage
 
@@ -22,25 +33,33 @@ expression.evaluateValue(model);
 // "Hello, Ada"
 ```
 
-`executeExpression` and `Expression.evaluate` return expression truthiness. `parseExpression` returns a reusable `Expression` whose `evaluateValue` method preserves the expression result's type. Expression models are JSON-like values: maps, lists, strings, numbers, booleans, and null.
+`executeExpression` and `Expression.evaluate` return the expression's truthiness. `parseExpression` returns a reusable `Expression`; call `evaluateValue` when you need the raw result. Missing and null values appear as `null` at the public API boundary.
 
-## Expression Syntax
+## Example
 
-Constants include case-insensitive `true` and `false`, signed/decimal/exponent numeric literals, strings quoted with single quotes, double quotes, or backticks, and recursive lists in square brackets.
+Run the repository's executable sample:
 
-Model references start with `#`. Nested values use dots, such as `#user.name`. An exact dotted map key takes precedence over nested traversal. References only resolve map keys; list indexes and list properties are not traversed. The segments `__proto__`, `constructor`, and `prototype` are rejected.
+```bash
+dart run tool/simple_expressions_example.dart
+```
 
-Operators are case-insensitive: `not`, `eq`, `or`, `and`, `contains`, `startswith`, `endswith`, `in`, `gt`, `lt`, `empty`, `len`, `lower`, `upper`, `trim`, `defined`, `concat`, `match`, and `if`.
+The sample is included for development and excluded from packages published with `dart pub publish`.
 
-Parsed expressions and `Expression` instances are cached by default with a FIFO limit of 1,000 entries. Use `SimpleExpressions.setCacheLimit`, `clear`, `disableCaches`, and `enableCaches` to manage caching.
+## Syntax
 
-Missing references are represented as `null` by `evaluateValue`. Internally a missing reference stays distinct from an explicit null, but the two are equal to each other under `eq` and behave identically for `defined` and `empty`. Numeric values are evaluated as Dart `double` values.
+Constants support case-insensitive Booleans, signed, decimal, and exponent-form numeric literals, single-, double-, or backtick-quoted strings, and recursive list literals in square brackets. References begin with `#`. For a dotted reference, the evaluator first checks for an exact dotted key and then traverses nested map values. References cannot contain empty segments or the reserved segments `__proto__`, `constructor`, and `prototype`; those restrictions are retained for compatibility with the TypeScript reference.
 
-`match` uses Dart `RegExp`, so regular-expression patterns follow Dart's regular-expression syntax rather than JavaScript's in every detail. Expressions and patterns should be treated as trusted input.
+Operators are case-insensitive:
+
+`not`, `empty`, `len`, `lower`, `upper`, `trim`, `defined`, `eq`, `contains`, `startswith`, `endswith`, `in`, `gt`, `lt`, `match`, variadic `and`/`or`/`concat`, and lazy `if`.
+
+`in` requires a list and uses the same loose equality as `eq`. `trim` preserves null and missing values; other falsey values become empty strings before trimming. `defined` is false only for null and missing values. Lists may contain nested lists, model references, and operator expressions.
+
+The evaluator uses JavaScript-style truthiness, loose equality, and value conversion where those rules can be represented by Dart values. Numeric values are evaluated as Dart `double` values. `match` uses Dart `RegExp`, so patterns that rely on JavaScript-specific regex syntax are not portable.
 
 ## Differences from the TypeScript reference
 
-This port tracks the [TypeScript reference](https://github.com/LieselThuriot/simple-expressions) for grammar, operators, and evaluation order. It deliberately does not reproduce every JavaScript coercion quirk. Cross-language compatibility is tested independently in [simple-expressions-conformance](https://github.com/LieselThuriot/simple-expressions-conformance).
+This port follows the [TypeScript reference](https://github.com/LieselThuriot/simple-expressions) for grammar, operators, evaluation order, and selected safety rules. It does not reproduce every JavaScript coercion quirk. Cross-language compatibility is tested separately in [simple-expressions-conformance](https://github.com/LieselThuriot/simple-expressions-conformance).
 
 | Behaviour | TypeScript | This port |
 | --- | --- | --- |
@@ -49,19 +68,30 @@ This port tracks the [TypeScript reference](https://github.com/LieselThuriot/sim
 | `parseExpression` | Returns `(model) => value` | Returns an `Expression`; call `evaluateValue(model)` for the raw value or `evaluate(model)` for truthiness |
 | Class name | `SimpleExpression` | `Expression` |
 | Missing vs null | Distinguishable in results (`undefined` vs `null`) | Both surface as `null` from `evaluateValue`, and are equal under `eq` |
-| Model values | Any JavaScript object | Only `Map` keys resolve; a value of an unsupported runtime type is treated as an empty object |
+| Model values | Any JavaScript object | String keys in Dart `Map` values resolve; list indexes are not traversed, and an unsupported runtime type is treated as an empty object |
 
-Numbers render as their shortest round-trip decimal, in plain notation for magnitudes in `[1e-6, 1e21)` and lowercase exponent notation outside it — the same rule the C# port uses, and the same output JavaScript produces for these values.
+Numbers use the same formatting rule as the TypeScript reference: the shortest round-trip decimal, plain notation for magnitudes in `[1e-6, 1e21)`, and lowercase exponent notation outside that range.
 
-## Example
+## Model Access
 
-Run the executable sample from this repository:
+Models are read when an expression asks for a value. Nothing is copied or converted up front, so an expression only visits the parts of a model that it references.
 
-```bash
-dart run tool/simple_expressions_example.dart
-```
+Model values can be Dart maps and lists, along with strings, numbers, booleans, and null. Map keys are matched as strings. A non-map model root resolves every reference to a missing value.
 
-The sample is kept in the repository for development and is excluded from packages published with `dart pub publish`.
+Keep these details in mind:
+
+- Model values are read live at evaluation time. Mutations made between evaluations are visible to the next evaluation.
+- List indexes and list properties are not traversed through references.
+- A value with an unsupported Dart runtime type is treated as an empty object.
+- Missing references surface as `null` from `evaluateValue`. Internally, missing and explicit null remain distinct, but `eq`, `defined`, and `empty` treat them the same.
+
+## Caching
+
+Parsed expressions and `Expression` instances are cached by default. Both caches use a FIFO limit of 1,000 entries. Use `SimpleExpressions.setCacheLimit`, `clear`, `disableCaches`, and `enableCaches` to control them. Disabling caches also clears existing entries.
+
+## Security
+
+Expressions and regex patterns are trusted input. Regex evaluation can be vulnerable to catastrophic backtracking. Do not use untrusted expressions or patterns as an authorization boundary.
 
 ## Development
 
