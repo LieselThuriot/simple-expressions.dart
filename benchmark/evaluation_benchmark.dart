@@ -75,7 +75,7 @@ final Map<String, Object?> largeModel = makeModel(200);
 final Expression parsedSimpleRule = parseExpression(simpleRule);
 
 class EvaluationBenchmark extends BenchmarkBase {
-  EvaluationBenchmark(String name, this._body) : super(name);
+  EvaluationBenchmark(super.name, this._body);
 
   final void Function() _body;
 

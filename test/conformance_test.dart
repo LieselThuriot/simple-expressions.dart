@@ -6,7 +6,7 @@ import 'package:test/test.dart';
 
 void main() {
   final document = jsonDecode(
-    File('conformance/spec/v1/cases.json').readAsStringSync(),
+    File('test/fixtures/conformance/spec/v1/cases.json').readAsStringSync(),
   ) as Map<String, dynamic>;
   final cases = (document['cases'] as List).cast<Map<String, dynamic>>();
 
@@ -34,8 +34,9 @@ void main() {
 }
 
 bool _matches(Object? expected, Object? actual) {
-  if (expected is num && actual is num)
+  if (expected is num && actual is num) {
     return expected.toDouble() == actual.toDouble();
+  }
   if (expected is List) {
     if (actual is! List || expected.length != actual.length) return false;
     for (var index = 0; index < expected.length; index++) {

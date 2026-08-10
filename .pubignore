@@ -1,3 +1,7 @@
 .dart_tool/
 pubspec.lock
-tool/
+.git/
+.github/
+coverage/
+doc/api/
+*.log

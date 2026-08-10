@@ -1,6 +1,6 @@
 # simple_expressions
 
-![simple-expressions logo](https://raw.githubusercontent.com/LieselThuriot/simple-expressions.sharp/main/simple-expressions.png)
+![simple-expressions logo](https://raw.githubusercontent.com/LieselThuriot/simple-expressions.dart/refs/heads/master/simple-expressions.png)
 
 [![pub package](https://img.shields.io/pub/v/simple_expressions.svg)](https://pub.dev/packages/simple_expressions)
 [![license](https://img.shields.io/pub/l/simple_expressions.svg)](https://pub.dev/packages/simple_expressions/license)
@@ -37,13 +37,13 @@ expression.evaluateValue(model);
 
 ## Example
 
-Run the repository's executable sample:
+Run the package example:
 
 ```bash
-dart run tool/simple_expressions_example.dart
+dart run example/simple_expressions_example.dart
 ```
 
-The sample is included for development and excluded from packages published with `dart pub publish`.
+The sample is included in the published package's Example tab.
 
 ## Syntax
 
