@@ -64,7 +64,6 @@ This port follows the [TypeScript reference](https://github.com/LieselThuriot/si
 | Behaviour | TypeScript | This port |
 | --- | --- | --- |
 | String to number | `Number("")` is `0`, `"Infinity"` is a keyword | A string converts only if it parses as a number; `""` and `"   "` are `NaN` |
-| `eq` on two lists or maps | Reference equality, so `eq(#a, #b)` on equal-looking lists is false | Structural equality: same length or key set, and every pair loosely equal, to a depth of 64 |
 | `parseExpression` | Returns `(model) => value` | Returns a `SimpleExpression`; call `evaluateValue(model)` for the raw value or `evaluate(model)` for truthiness |
 | Missing vs null | Distinguishable in results (`undefined` vs `null`) | Both surface as `null` from `evaluateValue`, and are equal under `eq` |
 | Model values | Any JavaScript object | String keys in Dart `Map` values resolve; list indexes are not traversed, and an unsupported runtime type is treated as an empty object |
