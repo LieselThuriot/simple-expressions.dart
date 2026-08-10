@@ -19,11 +19,11 @@ class ExpressionParseException extends FormatException {
 }
 
 /// A reusable parsed expression.
-class Expression {
-  Expression._compiled(this._evaluator);
+class SimpleExpression {
+  SimpleExpression._compiled(this._evaluator);
 
   /// Creates a reusable expression from a Boolean or expression string.
-  Expression(Object expression) {
+  SimpleExpression(Object expression) {
     if (expression is bool) {
       _evaluator = _Compiled.constant(expression ? _trueValue : _falseValue);
     } else if (expression is String) {
@@ -52,8 +52,9 @@ class Expression {
 }
 
 /// Parses expression text into a reusable evaluator.
-Expression parseExpression(String expression) => Expression._compiled(
-    SimpleExpressions._getParsedExpression(expression.trim()));
+SimpleExpression parseExpression(String expression) =>
+    SimpleExpression._compiled(
+        SimpleExpressions._getParsedExpression(expression.trim()));
 
 /// Evaluates an expression and returns its truthiness.
 bool executeExpression(Object? model, Object expression) =>
@@ -67,18 +68,18 @@ class SimpleExpressions {
   static int _cacheLimit = _defaultCacheLimit;
   static bool _enabledCaches = true;
   static final LinkedHashMap<String, _Compiled> _parseCache = LinkedHashMap();
-  static final LinkedHashMap<String, Expression> _expressionCache =
+  static final LinkedHashMap<String, SimpleExpression> _expressionCache =
       LinkedHashMap();
 
   /// Returns a cached reusable expression when caching is enabled.
-  static Expression get(Object expression) {
+  static SimpleExpression get(Object expression) {
     final key = expression is String ? expression : '$expression';
     if (_enabledCaches) {
       final cached = _expressionCache[key];
       if (cached != null) return cached;
     }
 
-    final result = Expression(expression);
+    final result = SimpleExpression(expression);
     if (_enabledCaches) _setCacheValue(_expressionCache, key, result);
     return result;
   }

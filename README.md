@@ -33,7 +33,7 @@ expression.evaluateValue(model);
 // "Hello, Ada"
 ```
 
-`executeExpression` and `Expression.evaluate` return the expression's truthiness. `parseExpression` returns a reusable `Expression`; call `evaluateValue` when you need the raw result. Missing and null values appear as `null` at the public API boundary.
+`executeExpression` and `SimpleExpression.evaluate` return the expression's truthiness. `parseExpression` returns a reusable `SimpleExpression`; call `evaluateValue` when you need the raw result. Missing and null values appear as `null` at the public API boundary.
 
 ## Example
 
@@ -65,8 +65,7 @@ This port follows the [TypeScript reference](https://github.com/LieselThuriot/si
 | --- | --- | --- |
 | String to number | `Number("")` is `0`, `"Infinity"` is a keyword | A string converts only if it parses as a number; `""` and `"   "` are `NaN` |
 | `eq` on two lists or maps | Reference equality, so `eq(#a, #b)` on equal-looking lists is false | Structural equality: same length or key set, and every pair loosely equal, to a depth of 64 |
-| `parseExpression` | Returns `(model) => value` | Returns an `Expression`; call `evaluateValue(model)` for the raw value or `evaluate(model)` for truthiness |
-| Class name | `SimpleExpression` | `Expression` |
+| `parseExpression` | Returns `(model) => value` | Returns a `SimpleExpression`; call `evaluateValue(model)` for the raw value or `evaluate(model)` for truthiness |
 | Missing vs null | Distinguishable in results (`undefined` vs `null`) | Both surface as `null` from `evaluateValue`, and are equal under `eq` |
 | Model values | Any JavaScript object | String keys in Dart `Map` values resolve; list indexes are not traversed, and an unsupported runtime type is treated as an empty object |
 
@@ -87,7 +86,7 @@ Keep these details in mind:
 
 ## Caching
 
-Parsed expressions and `Expression` instances are cached by default. Both caches use a FIFO limit of 1,000 entries. Use `SimpleExpressions.setCacheLimit`, `clear`, `disableCaches`, and `enableCaches` to control them. Disabling caches also clears existing entries.
+Parsed expressions and `SimpleExpression` instances are cached by default. Both caches use a FIFO limit of 1,000 entries. Use `SimpleExpressions.setCacheLimit`, `clear`, `disableCaches`, and `enableCaches` to control them. Disabling caches also clears existing entries.
 
 ## Security
 

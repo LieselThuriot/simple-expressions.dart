@@ -1,4 +1,4 @@
-// Measures the per-evaluation cost of the model access path. Expression
+// Measures the per-evaluation cost of the model access path. SimpleExpression
 // parsing is cached globally, so after warmup every benchmark here measures
 // model access only. Mirrors the C# EvaluationBenchmarks scenarios.
 import 'package:benchmark_harness/benchmark_harness.dart';
@@ -72,7 +72,7 @@ Map<String, Object?> makeModel(int payloadEntries) {
 
 final Map<String, Object?> smallModel = makeModel(0);
 final Map<String, Object?> largeModel = makeModel(200);
-final Expression parsedSimpleRule = parseExpression(simpleRule);
+final SimpleExpression parsedSimpleRule = parseExpression(simpleRule);
 
 class EvaluationBenchmark extends BenchmarkBase {
   EvaluationBenchmark(super.name, this._body);

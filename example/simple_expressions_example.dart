@@ -11,9 +11,10 @@ void main() {
     model,
     'and(eq(#user.name, "Ada"), gt(#score, 5))',
   );
-  final greeting = parseExpression(
+  final SimpleExpression greetingExpression = parseExpression(
     'concat("Hello, ", #user.name, "!")',
-  ).evaluateValue(model);
+  );
+  final greeting = greetingExpression.evaluateValue(model);
   final status = parseExpression(
     'if(and(gt(#score, 5), lt(#score, 10)), "ready", "keep practicing")',
   ).evaluateValue(model);
