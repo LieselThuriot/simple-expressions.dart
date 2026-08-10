@@ -3,7 +3,7 @@
 ![simple-expressions logo](https://raw.githubusercontent.com/LieselThuriot/simple-expressions.dart/refs/heads/master/simple-expressions.png)
 
 [![pub package](https://img.shields.io/pub/v/simple_expressions.svg)](https://pub.dev/packages/simple_expressions)
-[![license](https://img.shields.io/pub/l/simple_expressions.svg)](https://pub.dev/packages/simple_expressions/license)
+[![license](https://img.shields.io/npm/l/simple-expressions.svg)](https://pub.dev/packages/simple_expressions/license)
 
 A Dart package for parsing and evaluating expressions against JSON-like model values.
 
