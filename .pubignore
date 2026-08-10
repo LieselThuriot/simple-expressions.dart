@@ -5,3 +5,4 @@ pubspec.lock
 coverage/
 doc/api/
 *.log
+simple-expressions.png
