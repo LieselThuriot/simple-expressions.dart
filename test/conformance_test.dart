@@ -11,6 +11,13 @@ void main() {
   final cases = (document['cases'] as List).cast<Map<String, dynamic>>();
 
   for (final item in cases) {
+    final expectations = ['value', 'truthy', 'error']
+        .where(item.containsKey)
+        .length;
+    expect(expectations, 1, reason: 'Each case must have one expectation');
+  }
+
+  for (final item in cases) {
     test('v1/${item['id']}', () {
       final expression = item['expression'] as String;
       final model = (item['model'] as Map?) ?? const <String, Object?>{};
@@ -41,6 +48,14 @@ bool _matches(Object? expected, Object? actual) {
     if (actual is! List || expected.length != actual.length) return false;
     for (var index = 0; index < expected.length; index++) {
       if (!_matches(expected[index], actual[index])) return false;
+    }
+    return true;
+  }
+  if (expected is Map) {
+    if (actual is! Map || expected.length != actual.length) return false;
+    for (final entry in expected.entries) {
+      if (!actual.containsKey(entry.key) ||
+          !_matches(entry.value, actual[entry.key])) return false;
     }
     return true;
   }
