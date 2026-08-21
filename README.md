@@ -3,11 +3,11 @@
 ![simple-expressions logo](https://raw.githubusercontent.com/LieselThuriot/simple-expressions.dart/refs/heads/master/simple-expressions.png)
 
 [![pub package](https://img.shields.io/pub/v/simple_expressions.svg)](https://pub.dev/packages/simple_expressions)
-[![license](https://img.shields.io/npm/l/simple-expressions.svg)](https://pub.dev/packages/simple_expressions/license)
+[![license](https://img.shields.io/github/license/LieselThuriot/simple-expressions.dart.svg)](https://github.com/LieselThuriot/simple-expressions.dart/blob/master/LICENSE)
 
-A Dart package for parsing and evaluating expressions against JSON-like model values.
+A dependency-free Dart and Flutter package for parsing and evaluating trusted expressions against JSON-like model values.
 
-This package is licensed under the MIT License.
+Requires Dart 3.0 or later.
 
 ## Install
 
@@ -35,6 +35,8 @@ expression.evaluateValue(model);
 
 `executeExpression` and `SimpleExpression.evaluate` return the expression's truthiness. `parseExpression` returns a reusable `SimpleExpression`; call `evaluateValue` when you need the raw result. Missing and null values appear as `null` at the public API boundary.
 
+`SimpleExpression` accepts a string or Boolean. `SimpleExpressions.get` returns a cached reusable expression when caching is enabled. `ExpressionParseException` exposes the zero-based source position for positioned parse errors.
+
 ## Example
 
 Run the package example:
@@ -49,11 +51,11 @@ The sample is included in the published package's Example tab.
 
 Constants support case-insensitive Booleans, signed, decimal, and exponent-form numeric literals, single-, double-, or backtick-quoted strings, and recursive list literals in square brackets. References begin with `#`. For a dotted reference, the evaluator first checks for an exact dotted key and then traverses nested map values. References cannot contain empty segments or the reserved segments `__proto__`, `constructor`, and `prototype`; those restrictions are retained for compatibility with the TypeScript reference.
 
-Operators are case-insensitive:
+Operators are case-insensitive. `and` and `or` are variadic and short-circuit. `if` is lazy and evaluates only its selected branch. `in` requires a list; `contains`, `startswith`, and `endswith` require a string left operand. `len` returns `0` for nullish values, a string/list length, or an exact `length` map key, and throws otherwise.
 
-`not`, `empty`, `len`, `lower`, `upper`, `trim`, `defined`, `int`, `num`, `abs`, `floor`, `ceil`, `sqrt`, `eq`, `contains`, `startswith`, `endswith`, `in`, `gt`, `lt`, `match`, `round`, `pow`, `clamp`, variadic `and`/`or`/`concat`/`add`/`sub`/`mul`/`div`/`mod`/`min`/`max`, and lazy `if`.
+`not`, `empty`, `defined`, `lower`, `upper`, `trim`, `int`, `num`, `abs`, `floor`, `ceil`, and `sqrt` take one argument. `eq`, `contains`, `startswith`, `endswith`, `in`, `gt`, `lt`, `match`, `round`, and `pow` take two. `clamp` and `if` take three. `concat`, `add`, `sub`, `mul`, `div`, `mod`, `min`, and `max` take two or more; `add`, `mul`, `min`, and `max` also accept one list and expand lists one level.
 
-`in` requires a list and uses the same loose equality as `eq`. `trim` preserves null and missing values; other falsey values become empty strings before trimming. `defined` is false only for null and missing values. Lists may contain nested lists, model references, and operator expressions.
+`in` uses the same loose equality as `eq`. `trim` preserves null and missing values; other falsey values become empty strings before trimming. `defined` is false only for null and missing values. Lists may contain nested lists, model references, and operator expressions. Numeric operators throw `Invalid numeric value` for empty, blank, or invalid strings. `div` and `mod` throw `Division by zero` for zero divisors; `min` and `max` throw for empty lists.
 
 Numeric operators convert values using the port's Dart numeric rules. `add`, `mul`, `min`, and `max` expand list arguments one level and accept a single list argument. `round` requires a non-negative integer precision, and `div`/`mod` throw for a zero divisor.
 
@@ -61,24 +63,24 @@ The evaluator uses JavaScript-style truthiness, loose equality, and value conver
 
 ## Differences from the TypeScript reference
 
-This port follows the [TypeScript reference](https://github.com/LieselThuriot/simple-expressions) for grammar, operators, evaluation order, and selected safety rules. It does not reproduce every JavaScript coercion quirk. Cross-language compatibility is tested separately in [simple-expressions-conformance](https://github.com/LieselThuriot/simple-expressions-conformance).
+This port follows the [TypeScript reference](https://github.com/LieselThuriot/simple-expressions) for grammar, operators, evaluation order, and selected safety rules. The main portability differences are Dart map/value representation, Dart `RegExp`, and the documented empty-string equality rule. Cross-language compatibility is tested separately in [simple-expressions-conformance](https://github.com/LieselThuriot/simple-expressions-conformance).
 
 | Behaviour | TypeScript | This port |
 | --- | --- | --- |
-| String to number | Invalid numeric strings throw in numeric operators | Empty, blank, and invalid strings throw in numeric operators |
+| Equality of empty strings and zero | `eq("", 0)` is true through JavaScript loose equality | `eq("", 0)` is false |
 | `parseExpression` | Returns `(model) => value` | Returns a `SimpleExpression`; call `evaluateValue(model)` for the raw value or `evaluate(model)` for truthiness |
 | Missing vs null | Distinguishable in results (`undefined` vs `null`) | Both surface as `null` from `evaluateValue`, and are equal under `eq` |
 | Model values | Any JavaScript object | String keys in Dart `Map` values resolve; list indexes are not traversed, and an unsupported runtime type is treated as an empty object |
 
 Numbers use the same formatting rule as the TypeScript reference: the shortest round-trip decimal, plain notation for magnitudes in `[1e-6, 1e21)`, and lowercase exponent notation outside that range.
 
-Structural equality applies to lists and maps and is cycle-safe. Numeric operators reject empty, blank, and invalid strings with `Invalid numeric value`; loose `eq` comparisons remain non-throwing.
+Structural equality applies to lists and maps and is cycle-safe. Numeric operators reject empty, blank, and invalid strings with `Invalid numeric value`; loose `eq` comparisons remain non-throwing. Unlike the TypeScript reference, Dart treats empty and blank strings as unequal to numeric zero in `eq`.
 
 ## Model Access
 
 Models are read when an expression asks for a value. Nothing is copied or converted up front, so an expression only visits the parts of a model that it references.
 
-Model values can be Dart maps and lists, along with strings, numbers, booleans, and null. Map keys are matched as strings. A non-map model root resolves every reference to a missing value.
+Model values can be Dart maps and lists, along with strings, numbers, booleans, and null. Reference segments resolve exact String keys in Dart maps; non-string keys are not coerced. A non-map model root resolves every reference to a missing value.
 
 Keep these details in mind:
 
@@ -89,7 +91,7 @@ Keep these details in mind:
 
 ## Caching
 
-Parsed expressions and `SimpleExpression` instances are cached by default. Both caches use a FIFO limit of 1,000 entries. Use `SimpleExpressions.setCacheLimit` with a value of at least 1 to configure the limit; values below 1 throw. Use `clear`, `disableCaches`, and `enableCaches` to control cache contents and state. Disabling caches also clears existing entries.
+Parsed evaluators and expression wrappers returned by `SimpleExpressions.get` are cached by default. Both caches use a FIFO limit of 1,000 entries; cache hits do not refresh FIFO order. Use `clear({ parsed: true, expression: true })` for selective clearing, `setCacheLimit` to change the limit, and `disableCaches`/`enableCaches` to control caching. Disabling caches also clears existing entries.
 
 ## Security
 
@@ -103,3 +105,7 @@ dart format .
 dart analyze
 dart test
 ```
+
+## Conformance
+
+This package supports conformance specification v1. The pinned corpus is documented in `CONFORMANCE.md` and initialized at `test/fixtures/conformance`.
