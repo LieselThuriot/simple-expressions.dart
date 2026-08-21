@@ -74,6 +74,9 @@ class SimpleExpressions {
 
   /// Returns a cached reusable expression when caching is enabled.
   static SimpleExpression get(Object expression) {
+    if (expression is! String && expression is! bool) {
+      throw ArgumentError('Invalid Expression: unsupported type');
+    }
     final key = expression is String ? expression : '$expression';
     if (_enabledCaches) {
       final cached = _expressionCache[key];
@@ -509,8 +512,7 @@ class _ExpressionParser {
         return _Compiled((model) =>
             _Value.number(_truncate(_mathNumber(inner(model), strict: true))));
       case 'num':
-        return _Compiled(
-            (model) => _Value.number(_mathNumber(inner(model), strict: true)));
+        return _Compiled((model) => _Value.number(_num(inner(model))));
       case 'abs':
         return _Compiled((model) =>
             _Value.number(_mathNumber(inner(model), strict: true).abs()));
@@ -729,14 +731,11 @@ class _ExpressionParser {
             return result / value;
           }));
         case _NumericOperation.modulo:
-          return _Value.number(_foldNumeric(numbers, (result, value) {
-            if (value == 0) throw StateError('Division by zero');
-            return result - (result / value).truncateToDouble() * value;
-          }));
+          return _Value.number(_foldNumeric(numbers, _javascriptRemainder));
         case _NumericOperation.minimum:
-          return _Value.number(numbers.reduce((a, b) => a < b ? a : b));
+          return _Value.number(numbers.reduce(_javascriptMin));
         case _NumericOperation.maximum:
-          return _Value.number(numbers.reduce((a, b) => a > b ? a : b));
+          return _Value.number(numbers.reduce(_javascriptMax));
       }
     });
   }
@@ -776,12 +775,45 @@ double _mathNumber(_Value value, {bool strict = false}) {
   return _toNumber(value, strict: strict);
 }
 
+double _num(_Value value) {
+  if (value.kind == _ValueKind.array) {
+    throw StateError('Invalid numeric value');
+  }
+  return _mathNumber(value, strict: true);
+}
+
+double _javascriptRemainder(double dividend, double divisor) {
+  if (divisor == 0) throw StateError('Division by zero');
+  if (dividend.isNaN || divisor.isNaN || dividend.isInfinite) {
+    return double.nan;
+  }
+  if (divisor.isInfinite || dividend == 0) return dividend;
+  return dividend.remainder(divisor);
+}
+
+double _javascriptMin(double left, double right) {
+  if (left.isNaN || right.isNaN) return double.nan;
+  if (left == 0 && right == 0) {
+    return left.isNegative || right.isNegative ? -0.0 : 0.0;
+  }
+  return left < right ? left : right;
+}
+
+double _javascriptMax(double left, double right) {
+  if (left.isNaN || right.isNaN) return double.nan;
+  if (left == 0 && right == 0) {
+    return left.isNegative && right.isNegative ? -0.0 : 0.0;
+  }
+  return left > right ? left : right;
+}
+
 _Value _round(_Value value, _Value decimals) {
   final places = _mathNumber(decimals, strict: true);
   if (places.isNaN ||
       places.isInfinite ||
       places != places.truncateToDouble() ||
-      places < 0) {
+      places < 0 ||
+      places > 9007199254740991) {
     throw StateError('Round precision must be a non-negative safe integer');
   }
   final factor = math.pow(10, places).toDouble();
@@ -1086,7 +1118,7 @@ double _toNumber(_Value value, {bool strict = false}) {
     case _ValueKind.string:
       final text = (value.value as String).trim();
       final number = double.tryParse(text);
-      if (strict && (text.isEmpty || number == null)) {
+      if (strict && (text.isEmpty || number == null || number.isNaN)) {
         throw StateError('Invalid numeric value');
       }
       return number ?? double.nan;

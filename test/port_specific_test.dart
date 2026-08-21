@@ -73,6 +73,15 @@ void main() {
     expect(parseExpression('sqrt(9)').evaluateValue({}), 3.0);
   });
 
+  test('num rejects lists and NaN strings', () {
+    expect(
+        () => parseExpression('num([1])').evaluateValue({}), throwsStateError);
+    expect(() => parseExpression('num(#value)').evaluateValue({'value': []}),
+        throwsStateError);
+    expect(() => parseExpression('num("NaN")').evaluateValue({}),
+        throwsStateError);
+  });
+
   test('supports arithmetic operators and numeric list expansion', () {
     expect(parseExpression('add([1, 2, 3], 4)').evaluateValue({}), 10.0);
     expect(parseExpression('add([1, 2, 3])').evaluateValue({}), 6.0);
@@ -90,11 +99,56 @@ void main() {
     expect(parseExpression('clamp(12, 0, 10)').evaluateValue({}), 10.0);
   });
 
+  test('matches JavaScript remainder edge cases', () {
+    expect(parseExpression('mod(-7, 3)').evaluateValue({}), -1.0);
+    expect(parseExpression('mod(7, -3)').evaluateValue({}), 1.0);
+    expect(
+        parseExpression('mod(#value, 3)').evaluateValue({'value': 1e308}), 2.0);
+    expect(
+        parseExpression('mod(7, #value)')
+            .evaluateValue({'value': double.infinity}),
+        7.0);
+    expect(
+        (parseExpression('mod(#value, 3)')
+                .evaluateValue({'value': double.infinity}) as double)
+            .isNaN,
+        isTrue);
+  });
+
+  test('min and max propagate NaN and preserve signed zero', () {
+    expect(
+        (parseExpression('min(sqrt(-1), 1)').evaluateValue({}) as double).isNaN,
+        isTrue);
+    expect(
+        (parseExpression('max(1, sqrt(-1))').evaluateValue({}) as double).isNaN,
+        isTrue);
+
+    final minimum = parseExpression('min(#positive, #negative)')
+        .evaluateValue({'positive': 0.0, 'negative': -0.0}) as double;
+    final maximum = parseExpression('max(#negative, #positive)')
+        .evaluateValue({'positive': 0.0, 'negative': -0.0}) as double;
+    expect(minimum.isNegative, isTrue);
+    expect(maximum.isNegative, isFalse);
+  });
+
+  test('validates expression types before cache lookup', () {
+    SimpleExpressions.enableCaches();
+    SimpleExpressions.clear();
+    SimpleExpressions.get('1');
+
+    expect(() => SimpleExpressions.get(1), throwsArgumentError);
+  });
+
   test('rejects invalid mathematical operations', () {
     expect(() => parseExpression('div(1, 0)').evaluateValue({}),
         throwsA(predicate((error) => '$error'.contains('Division by zero'))));
     expect(() => parseExpression('round(1.2, -1)').evaluateValue({}),
         throwsA(predicate((error) => '$error'.contains('Round precision'))));
+    expect(
+        () => parseExpression('round(1.2, #places)')
+            .evaluateValue({'places': 9007199254740992}),
+        throwsA(predicate(
+            (error) => '$error'.contains('non-negative safe integer'))));
     expect(() => parseExpression('min([])').evaluateValue({}),
         throwsA(predicate((error) => '$error'.contains('Min requires'))));
     expect(
