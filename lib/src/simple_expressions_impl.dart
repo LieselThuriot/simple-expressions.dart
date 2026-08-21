@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:math' as math;
 
 typedef _EvaluatorFunction = _Value Function(Map? model);
 
@@ -106,11 +107,10 @@ class SimpleExpressions {
     _enabledCaches = true;
   }
 
-  /// Sets the positive FIFO cache limit. Non-positive values disable caching.
+  /// Sets the FIFO cache limit. Values below 1 throw and do not change cache state.
   static void setCacheLimit(int limit) {
-    if (limit <= 0) {
-      disableCaches();
-      return;
+    if (limit < 1) {
+      throw ArgumentError.value(limit, 'limit', 'must be at least 1');
     }
     _cacheLimit = limit;
     _trimCache(_parseCache);
@@ -384,7 +384,12 @@ class _ExpressionParser {
     final left = _parseValue();
     if (arity == -1) {
       if (_tokenizer.kind != _TokenKind.comma) {
-        _fail('operator $operator expects at least two arguments');
+        if (_tokenizer.kind != _TokenKind.closeParen ||
+            !_supportsSingleListArgument(normalized)) {
+          _fail('operator $operator expects at least two arguments');
+        }
+        _tokenizer.next();
+        return _compileVariadic(normalized, [left]);
       }
       final values = <_Compiled>[left];
       while (_tokenizer.kind == _TokenKind.comma) {
@@ -441,6 +446,12 @@ class _ExpressionParser {
       case 'upper':
       case 'trim':
       case 'defined':
+      case 'int':
+      case 'num':
+      case 'abs':
+      case 'floor':
+      case 'ceil':
+      case 'sqrt':
         return 1;
       case 'eq':
       case 'contains':
@@ -450,10 +461,21 @@ class _ExpressionParser {
       case 'lt':
       case 'match':
       case 'in':
+      case 'round':
+      case 'pow':
         return 2;
+      case 'clamp':
+        return 3;
       case 'or':
       case 'and':
       case 'concat':
+      case 'add':
+      case 'sub':
+      case 'mul':
+      case 'div':
+      case 'mod':
+      case 'min':
+      case 'max':
         return -1;
       case 'if':
         return 3;
@@ -483,6 +505,23 @@ class _ExpressionParser {
       case 'defined':
         return _Compiled(
             (model) => inner(model).isNullish ? _falseValue : _trueValue);
+      case 'int':
+        return _Compiled(
+            (model) => _Value.number(_truncate(_mathNumber(inner(model)))));
+      case 'num':
+        return _Compiled((model) => _Value.number(_mathNumber(inner(model))));
+      case 'abs':
+        return _Compiled(
+            (model) => _Value.number(_mathNumber(inner(model)).abs()));
+      case 'floor':
+        return _Compiled(
+            (model) => _Value.number(_floor(_mathNumber(inner(model)))));
+      case 'ceil':
+        return _Compiled(
+            (model) => _Value.number(_ceil(_mathNumber(inner(model)))));
+      case 'sqrt':
+        return _Compiled(
+            (model) => _Value.number(math.sqrt(_mathNumber(inner(model)))));
       default:
         _fail('invalid operator: $operator');
     }
@@ -513,6 +552,11 @@ class _ExpressionParser {
             _compare(left(model), right(model)) < 0 ? _trueValue : _falseValue);
       case 'match':
         return _compileMatch(left, right);
+      case 'round':
+        return _Compiled((model) => _round(left(model), right(model)));
+      case 'pow':
+        return _Compiled((model) => _Value.number(
+            math.pow(_mathNumber(left(model)), _mathNumber(right(model)))));
       default:
         _fail('invalid operator: $operator');
     }
@@ -571,6 +615,26 @@ class _ExpressionParser {
           }
           return _Value.string(buffer.toString());
         });
+      case 'add':
+        return _compileNumericVariadic(values, _NumericOperation.add, operator);
+      case 'sub':
+        return _compileNumericVariadic(
+            values, _NumericOperation.subtract, operator);
+      case 'mul':
+        return _compileNumericVariadic(
+            values, _NumericOperation.multiply, operator);
+      case 'div':
+        return _compileNumericVariadic(
+            values, _NumericOperation.divide, operator);
+      case 'mod':
+        return _compileNumericVariadic(
+            values, _NumericOperation.modulo, operator);
+      case 'min':
+        return _compileNumericVariadic(
+            values, _NumericOperation.minimum, operator);
+      case 'max':
+        return _compileNumericVariadic(
+            values, _NumericOperation.maximum, operator);
       default:
         _fail('invalid operator: $operator');
     }
@@ -586,6 +650,10 @@ class _ExpressionParser {
       case 'if':
         return _Compiled((model) =>
             condition(model).isTruthy ? whenTrue(model) : whenFalse(model));
+      case 'clamp':
+        return _Compiled((model) => _Value.number(_mathNumber(condition(model))
+            .clamp(
+                _mathNumber(whenTrue(model)), _mathNumber(whenFalse(model)))));
       default:
         _fail('invalid operator: $operator');
     }
@@ -605,6 +673,119 @@ class _ExpressionParser {
 
   Never _fail(String message) =>
       throw ExpressionParseException(message, _tokenizer.position);
+
+  static bool _supportsSingleListArgument(String operator) =>
+      operator == 'add' ||
+      operator == 'mul' ||
+      operator == 'min' ||
+      operator == 'max';
+
+  static _Compiled _compileNumericVariadic(
+      List<_Compiled> arguments, _NumericOperation operation, String name) {
+    return _Compiled((model) {
+      final numbers = <double>[];
+      final expandsLists = operation == _NumericOperation.add ||
+          operation == _NumericOperation.multiply ||
+          operation == _NumericOperation.minimum ||
+          operation == _NumericOperation.maximum;
+
+      for (final argument in arguments) {
+        final value = argument(model);
+        if (expandsLists && value.kind == _ValueKind.array) {
+          final items = value.value as List;
+          for (final item in items) {
+            numbers.add(_mathNumber(_arrayItem(item)));
+          }
+        } else if (expandsLists && arguments.length == 1) {
+          throw StateError('operator $name expects at least two arguments');
+        } else {
+          numbers.add(_mathNumber(value));
+        }
+      }
+
+      if ((operation == _NumericOperation.minimum ||
+              operation == _NumericOperation.maximum) &&
+          numbers.isEmpty) {
+        throw StateError(operation == _NumericOperation.minimum
+            ? 'Min requires at least one value'
+            : 'Max requires at least one value');
+      }
+
+      switch (operation) {
+        case _NumericOperation.add:
+          return _Value.number(numbers.fold(0, (sum, value) => sum + value));
+        case _NumericOperation.multiply:
+          return _Value.number(
+              numbers.fold(1, (product, value) => product * value));
+        case _NumericOperation.subtract:
+          return _Value.number(
+              _foldNumeric(numbers, (result, value) => result - value));
+        case _NumericOperation.divide:
+          return _Value.number(_foldNumeric(numbers, (result, value) {
+            if (value == 0) throw StateError('Division by zero');
+            return result / value;
+          }));
+        case _NumericOperation.modulo:
+          return _Value.number(_foldNumeric(numbers, (result, value) {
+            if (value == 0) throw StateError('Division by zero');
+            return result - (result / value).truncateToDouble() * value;
+          }));
+        case _NumericOperation.minimum:
+          return _Value.number(numbers.reduce((a, b) => a < b ? a : b));
+        case _NumericOperation.maximum:
+          return _Value.number(numbers.reduce((a, b) => a > b ? a : b));
+      }
+    });
+  }
+
+  static double _foldNumeric(
+      List<double> values, double Function(double, double) operation) {
+    var result = values.first;
+    for (final value in values.skip(1)) {
+      result = operation(result, value);
+    }
+    return result;
+  }
+}
+
+enum _NumericOperation {
+  add,
+  subtract,
+  multiply,
+  divide,
+  modulo,
+  minimum,
+  maximum
+}
+
+double _truncate(double value) => value.truncateToDouble();
+
+double _floor(double value) => value.floorToDouble();
+
+double _ceil(double value) => value.ceilToDouble();
+
+double _mathNumber(_Value value) {
+  if (value.kind == _ValueKind.string &&
+      (value.value as String).trim().isEmpty) {
+    return 0;
+  }
+  return _toNumber(value);
+}
+
+_Value _round(_Value value, _Value decimals) {
+  final places = _mathNumber(decimals);
+  if (places.isNaN ||
+      places.isInfinite ||
+      places != places.truncateToDouble() ||
+      places < 0) {
+    throw StateError('Round precision must be a non-negative safe integer');
+  }
+  final factor = math.pow(10, places).toDouble();
+  if (factor.isInfinite) {
+    throw StateError('Round precision is too large');
+  }
+  final number = _mathNumber(value);
+  return _Value.number((number * factor + 0.5).floorToDouble() / factor);
 }
 
 class _Compiled {

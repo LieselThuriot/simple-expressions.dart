@@ -36,4 +36,59 @@ void main() {
     expect(executeExpression({'value': ''}, 'eq(#value, 0)'), isFalse);
     expect(executeExpression({'value': '   '}, 'eq(#value, 0)'), isFalse);
   });
+
+  test('positive cache limits do not re-enable caching', () {
+    SimpleExpressions.disableCaches();
+    SimpleExpressions.setCacheLimit(10);
+
+    expect(SimpleExpressions.get('true'),
+        isNot(same(SimpleExpressions.get('true'))));
+  });
+
+  test('invalid cache limits throw without changing cache state', () {
+    expect(() => SimpleExpressions.setCacheLimit(0), throwsArgumentError);
+
+    SimpleExpressions.enableCaches();
+    expect(() => SimpleExpressions.setCacheLimit(-1), throwsArgumentError);
+    expect(SimpleExpressions.get('true'), same(SimpleExpressions.get('true')));
+  });
+
+  test('supports unary mathematical operators', () {
+    expect(parseExpression('int(-2.9)').evaluateValue({}), -2.0);
+    expect(parseExpression('num("2.5")').evaluateValue({}), 2.5);
+    expect(parseExpression('abs(-4)').evaluateValue({}), 4.0);
+    expect(parseExpression('floor(2.9)').evaluateValue({}), 2.0);
+    expect(parseExpression('ceil(2.1)').evaluateValue({}), 3.0);
+    expect(parseExpression('sqrt(9)').evaluateValue({}), 3.0);
+  });
+
+  test('supports arithmetic operators and numeric list expansion', () {
+    expect(parseExpression('add([1, 2, 3], 4)').evaluateValue({}), 10.0);
+    expect(parseExpression('add([1, 2, 3])').evaluateValue({}), 6.0);
+    expect(parseExpression('sub(20, 5, 2)').evaluateValue({}), 13.0);
+    expect(parseExpression('mul([2, 3])').evaluateValue({}), 6.0);
+    expect(parseExpression('div(20, 5, 2)').evaluateValue({}), 2.0);
+    expect(parseExpression('mod(17, 5)').evaluateValue({}), 2.0);
+    expect(parseExpression('min([4, 2, 8])').evaluateValue({}), 2.0);
+    expect(parseExpression('max(1, [4, 2], 3)').evaluateValue({}), 4.0);
+  });
+
+  test('supports round, power, and clamp', () {
+    expect(parseExpression('round(12.345, 2)').evaluateValue({}), 12.35);
+    expect(parseExpression('pow(2, 3)').evaluateValue({}), 8.0);
+    expect(parseExpression('clamp(12, 0, 10)').evaluateValue({}), 10.0);
+  });
+
+  test('rejects invalid mathematical operations', () {
+    expect(() => parseExpression('div(1, 0)').evaluateValue({}),
+        throwsA(predicate((error) => '$error'.contains('Division by zero'))));
+    expect(() => parseExpression('round(1.2, -1)').evaluateValue({}),
+        throwsA(predicate((error) => '$error'.contains('Round precision'))));
+    expect(() => parseExpression('min([])').evaluateValue({}),
+        throwsA(predicate((error) => '$error'.contains('Min requires'))));
+    expect(
+        () => parseExpression('add(1)').evaluateValue({}),
+        throwsA(
+            predicate((error) => '$error'.contains('at least two arguments'))));
+  });
 }

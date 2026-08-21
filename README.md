@@ -7,7 +7,7 @@
 
 A Dart package for parsing and evaluating expressions against JSON-like model values.
 
-This package is licensed under the ISC License.
+This package is licensed under the MIT License.
 
 ## Install
 
@@ -51,9 +51,11 @@ Constants support case-insensitive Booleans, signed, decimal, and exponent-form 
 
 Operators are case-insensitive:
 
-`not`, `empty`, `len`, `lower`, `upper`, `trim`, `defined`, `eq`, `contains`, `startswith`, `endswith`, `in`, `gt`, `lt`, `match`, variadic `and`/`or`/`concat`, and lazy `if`.
+`not`, `empty`, `len`, `lower`, `upper`, `trim`, `defined`, `int`, `num`, `abs`, `floor`, `ceil`, `sqrt`, `eq`, `contains`, `startswith`, `endswith`, `in`, `gt`, `lt`, `match`, `round`, `pow`, `clamp`, variadic `and`/`or`/`concat`/`add`/`sub`/`mul`/`div`/`mod`/`min`/`max`, and lazy `if`.
 
 `in` requires a list and uses the same loose equality as `eq`. `trim` preserves null and missing values; other falsey values become empty strings before trimming. `defined` is false only for null and missing values. Lists may contain nested lists, model references, and operator expressions.
+
+Numeric operators convert values using the port's Dart numeric rules. `add`, `mul`, `min`, and `max` expand list arguments one level and accept a single list argument. `round` requires a non-negative integer precision, and `div`/`mod` throw for a zero divisor.
 
 The evaluator uses JavaScript-style truthiness, loose equality, and value conversion where those rules can be represented by Dart values. Numeric values are evaluated as Dart `double` values. `match` uses Dart `RegExp`, so patterns that rely on JavaScript-specific regex syntax are not portable.
 
@@ -85,7 +87,7 @@ Keep these details in mind:
 
 ## Caching
 
-Parsed expressions and `SimpleExpression` instances are cached by default. Both caches use a FIFO limit of 1,000 entries. Use `SimpleExpressions.setCacheLimit`, `clear`, `disableCaches`, and `enableCaches` to control them. Disabling caches also clears existing entries.
+Parsed expressions and `SimpleExpression` instances are cached by default. Both caches use a FIFO limit of 1,000 entries. Use `SimpleExpressions.setCacheLimit` with a value of at least 1 to configure the limit; values below 1 throw. Use `clear`, `disableCaches`, and `enableCaches` to control cache contents and state. Disabling caches also clears existing entries.
 
 ## Security
 
