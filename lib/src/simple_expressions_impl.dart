@@ -30,7 +30,7 @@ class SimpleExpression {
     } else if (expression is String) {
       final normalized = expression.trim();
       if (normalized.isEmpty) {
-        throw ExpressionParseException('whitespace', 0);
+        throw ExpressionParseException.withoutPosition('whitespace');
       }
       _evaluator = SimpleExpressions._getParsedExpression(normalized);
     } else {
@@ -120,7 +120,7 @@ class SimpleExpressions {
   // Callers pass already-trimmed input.
   static _Compiled _getParsedExpression(String expression) {
     if (expression.isEmpty) {
-      throw ExpressionParseException('formatting', 0);
+      throw ExpressionParseException.withoutPosition('formatting');
     }
     if (_enabledCaches) {
       final cached = _parseCache[expression];
@@ -507,21 +507,21 @@ class _ExpressionParser {
             (model) => inner(model).isNullish ? _falseValue : _trueValue);
       case 'int':
         return _Compiled(
-            (model) => _Value.number(_truncate(_mathNumber(inner(model)))));
+            (model) => _Value.number(_truncate(_mathNumber(inner(model), strict: true))));
       case 'num':
-        return _Compiled((model) => _Value.number(_mathNumber(inner(model))));
+        return _Compiled((model) => _Value.number(_mathNumber(inner(model), strict: true)));
       case 'abs':
         return _Compiled(
-            (model) => _Value.number(_mathNumber(inner(model)).abs()));
+            (model) => _Value.number(_mathNumber(inner(model), strict: true).abs()));
       case 'floor':
         return _Compiled(
-            (model) => _Value.number(_floor(_mathNumber(inner(model)))));
+            (model) => _Value.number(_floor(_mathNumber(inner(model), strict: true))));
       case 'ceil':
         return _Compiled(
-            (model) => _Value.number(_ceil(_mathNumber(inner(model)))));
+            (model) => _Value.number(_ceil(_mathNumber(inner(model), strict: true))));
       case 'sqrt':
         return _Compiled(
-            (model) => _Value.number(math.sqrt(_mathNumber(inner(model)))));
+            (model) => _Value.number(math.sqrt(_mathNumber(inner(model), strict: true))));
       default:
         _fail('invalid operator: $operator');
     }
@@ -556,7 +556,7 @@ class _ExpressionParser {
         return _Compiled((model) => _round(left(model), right(model)));
       case 'pow':
         return _Compiled((model) => _Value.number(
-            math.pow(_mathNumber(left(model)), _mathNumber(right(model)))));
+            math.pow(_mathNumber(left(model), strict: true), _mathNumber(right(model), strict: true)));
       default:
         _fail('invalid operator: $operator');
     }
@@ -651,9 +651,9 @@ class _ExpressionParser {
         return _Compiled((model) =>
             condition(model).isTruthy ? whenTrue(model) : whenFalse(model));
       case 'clamp':
-        return _Compiled((model) => _Value.number(_mathNumber(condition(model))
-            .clamp(
-                _mathNumber(whenTrue(model)), _mathNumber(whenFalse(model)))));
+        return _Compiled((model) => _Value.number(math.min(
+            math.max(_mathNumber(condition(model)), _mathNumber(whenTrue(model))),
+            _mathNumber(whenFalse(model)))));
       default:
         _fail('invalid operator: $operator');
     }
@@ -694,12 +694,12 @@ class _ExpressionParser {
         if (expandsLists && value.kind == _ValueKind.array) {
           final items = value.value as List;
           for (final item in items) {
-            numbers.add(_mathNumber(_arrayItem(item)));
+            numbers.add(_mathNumber(_arrayItem(item), strict: true));
           }
         } else if (expandsLists && arguments.length == 1) {
           throw StateError('operator $name expects at least two arguments');
         } else {
-          numbers.add(_mathNumber(value));
+          numbers.add(_mathNumber(value, strict: true));
         }
       }
 
@@ -764,16 +764,16 @@ double _floor(double value) => value.floorToDouble();
 
 double _ceil(double value) => value.ceilToDouble();
 
-double _mathNumber(_Value value) {
+double _mathNumber(_Value value, {bool strict = false}) {
   if (value.kind == _ValueKind.string &&
       (value.value as String).trim().isEmpty) {
     return 0;
   }
-  return _toNumber(value);
+  return _toNumber(value, strict: strict);
 }
 
 _Value _round(_Value value, _Value decimals) {
-  final places = _mathNumber(decimals);
+  final places = _mathNumber(decimals, strict: true);
   if (places.isNaN ||
       places.isInfinite ||
       places != places.truncateToDouble() ||
@@ -784,7 +784,7 @@ _Value _round(_Value value, _Value decimals) {
   if (factor.isInfinite) {
     throw StateError('Round precision is too large');
   }
-  final number = _mathNumber(value);
+  final number = _mathNumber(value, strict: true);
   return _Value.number((number * factor + 0.5).floorToDouble() / factor);
 }
 
@@ -962,8 +962,6 @@ void _writeConcatValue(StringBuffer buffer, _Value value) {
   if (value.isTruthy) buffer.write(_toJavaScriptString(value));
 }
 
-const int _maxStructuralDepth = 64;
-
 const int _runtimePatternCacheLimit = 64;
 final Map<String, RegExp> _runtimePatterns = <String, RegExp>{};
 
@@ -980,7 +978,15 @@ RegExp _runtimeRegExp(String pattern) {
   return regex;
 }
 
-bool _looseEquals(_Value left, _Value right, [int depth = 0]) {
+class _EqualityContext {
+  final List<(Object, Object)> pairs = [];
+
+  bool contains(Object left, Object right) =>
+      pairs.any((pair) => identical(pair.$1, left) && identical(pair.$2, right));
+}
+
+bool _looseEquals(_Value left, _Value right, [_EqualityContext? context]) {
+  context ??= _EqualityContext();
   if (left.kind == right.kind) {
     switch (left.kind) {
       case _ValueKind.missing:
@@ -993,9 +999,9 @@ bool _looseEquals(_Value left, _Value right, [int depth = 0]) {
       case _ValueKind.string:
         return left.value == right.value;
       case _ValueKind.array:
-        return _structuralArrayEquals(left, right, depth);
-      case _ValueKind.object:
-        return _structuralObjectEquals(left, right, depth);
+         return _structuralArrayEquals(left, right, context);
+       case _ValueKind.object:
+         return _structuralObjectEquals(left, right, context);
     }
   }
   if (left.isNullish && right.isNullish) return true;
@@ -1015,31 +1021,33 @@ bool _looseEquals(_Value left, _Value right, [int depth = 0]) {
   return false;
 }
 
-bool _structuralArrayEquals(_Value left, _Value right, int depth) {
+bool _structuralArrayEquals(_Value left, _Value right, _EqualityContext context) {
   final leftItems = left.value as List;
   final rightItems = right.value as List;
   if (identical(leftItems, rightItems)) return true;
-  if (depth >= _maxStructuralDepth) return false;
+  if (context.contains(leftItems, rightItems)) return true;
+  context.pairs.add((leftItems, rightItems));
   if (leftItems.length != rightItems.length) return false;
   for (var index = 0; index < leftItems.length; index++) {
     if (!_looseEquals(_arrayItem(leftItems[index]),
-        _arrayItem(rightItems[index]), depth + 1)) {
+        _arrayItem(rightItems[index]), context)) {
       return false;
     }
   }
   return true;
 }
 
-bool _structuralObjectEquals(_Value left, _Value right, int depth) {
+bool _structuralObjectEquals(_Value left, _Value right, _EqualityContext context) {
   final leftEntries = left.value as Map;
   final rightEntries = right.value as Map;
   if (identical(leftEntries, rightEntries)) return true;
-  if (depth >= _maxStructuralDepth) return false;
+  if (context.contains(leftEntries, rightEntries)) return true;
+  context.pairs.add((leftEntries, rightEntries));
   if (leftEntries.length != rightEntries.length) return false;
   for (final key in leftEntries.keys) {
     if (!rightEntries.containsKey(key)) return false;
     if (!_looseEquals(_fromPublic(leftEntries[key]),
-        _fromPublic(rightEntries[key]), depth + 1)) {
+        _fromPublic(rightEntries[key]), context)) {
       return false;
     }
   }
@@ -1062,7 +1070,7 @@ int _compare(_Value left, _Value right) {
   return leftNumber.compareTo(rightNumber);
 }
 
-double _toNumber(_Value value) {
+double _toNumber(_Value value, {bool strict = false}) {
   switch (value.kind) {
     case _ValueKind.nullValue:
       return 0;
@@ -1071,9 +1079,12 @@ double _toNumber(_Value value) {
     case _ValueKind.number:
       return value.value as double;
     case _ValueKind.string:
-      // A string converts only if it parses as a number; unlike JavaScript,
-      // an empty string is not zero and `Infinity` is not a keyword.
-      return double.tryParse((value.value as String).trim()) ?? double.nan;
+      final text = (value.value as String).trim();
+      final number = double.tryParse(text);
+      if (strict && (text.isEmpty || number == null)) {
+        throw StateError('Invalid numeric value');
+      }
+      return number ?? double.nan;
     default:
       return double.nan;
   }
