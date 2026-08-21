@@ -506,22 +506,23 @@ class _ExpressionParser {
         return _Compiled(
             (model) => inner(model).isNullish ? _falseValue : _trueValue);
       case 'int':
-        return _Compiled(
-            (model) => _Value.number(_truncate(_mathNumber(inner(model), strict: true))));
+        return _Compiled((model) =>
+            _Value.number(_truncate(_mathNumber(inner(model), strict: true))));
       case 'num':
-        return _Compiled((model) => _Value.number(_mathNumber(inner(model), strict: true)));
+        return _Compiled(
+            (model) => _Value.number(_mathNumber(inner(model), strict: true)));
       case 'abs':
-        return _Compiled(
-            (model) => _Value.number(_mathNumber(inner(model), strict: true).abs()));
+        return _Compiled((model) =>
+            _Value.number(_mathNumber(inner(model), strict: true).abs()));
       case 'floor':
-        return _Compiled(
-            (model) => _Value.number(_floor(_mathNumber(inner(model), strict: true))));
+        return _Compiled((model) =>
+            _Value.number(_floor(_mathNumber(inner(model), strict: true))));
       case 'ceil':
-        return _Compiled(
-            (model) => _Value.number(_ceil(_mathNumber(inner(model), strict: true))));
+        return _Compiled((model) =>
+            _Value.number(_ceil(_mathNumber(inner(model), strict: true))));
       case 'sqrt':
-        return _Compiled(
-            (model) => _Value.number(math.sqrt(_mathNumber(inner(model), strict: true))));
+        return _Compiled((model) =>
+            _Value.number(math.sqrt(_mathNumber(inner(model), strict: true))));
       default:
         _fail('invalid operator: $operator');
     }
@@ -555,8 +556,9 @@ class _ExpressionParser {
       case 'round':
         return _Compiled((model) => _round(left(model), right(model)));
       case 'pow':
-        return _Compiled((model) => _Value.number(
-            math.pow(_mathNumber(left(model), strict: true), _mathNumber(right(model), strict: true)));
+        return _Compiled((model) => _Value.number(math.pow(
+            _mathNumber(left(model), strict: true),
+            _mathNumber(right(model), strict: true))));
       default:
         _fail('invalid operator: $operator');
     }
@@ -652,8 +654,9 @@ class _ExpressionParser {
             condition(model).isTruthy ? whenTrue(model) : whenFalse(model));
       case 'clamp':
         return _Compiled((model) => _Value.number(math.min(
-            math.max(_mathNumber(condition(model)), _mathNumber(whenTrue(model))),
-            _mathNumber(whenFalse(model)))));
+            math.max(_mathNumber(condition(model), strict: true),
+                _mathNumber(whenTrue(model), strict: true)),
+            _mathNumber(whenFalse(model), strict: true))));
       default:
         _fail('invalid operator: $operator');
     }
@@ -767,6 +770,7 @@ double _ceil(double value) => value.ceilToDouble();
 double _mathNumber(_Value value, {bool strict = false}) {
   if (value.kind == _ValueKind.string &&
       (value.value as String).trim().isEmpty) {
+    if (strict) throw StateError('Invalid numeric value');
     return 0;
   }
   return _toNumber(value, strict: strict);
@@ -819,8 +823,7 @@ class _Value {
   /// Arrays hold either the model's raw list (items converted lazily on
   /// access) or an already-converted `List<_Value>` for literal lists.
   const _Value.array(List value) : this(_ValueKind.array, value);
-  const _Value.object(Map<Object?, Object?> value)
-      : this(_ValueKind.object, value);
+  const _Value.object(Map value) : this(_ValueKind.object, value);
 
   final _ValueKind kind;
   final Object? value;
@@ -900,7 +903,7 @@ _Value _fromPublic(Object? value) {
   if (value is num) return _Value.number(value);
   if (value is String) return _Value.string(value);
   if (value is List) return _Value.array(value);
-  if (value is Map) return _Value.object(value.cast<Object?, Object?>());
+  if (value is Map) return _Value.object(value);
   return _Value.object(<Object?, Object?>{});
 }
 
@@ -981,8 +984,8 @@ RegExp _runtimeRegExp(String pattern) {
 class _EqualityContext {
   final List<(Object, Object)> pairs = [];
 
-  bool contains(Object left, Object right) =>
-      pairs.any((pair) => identical(pair.$1, left) && identical(pair.$2, right));
+  bool contains(Object left, Object right) => pairs
+      .any((pair) => identical(pair.$1, left) && identical(pair.$2, right));
 }
 
 bool _looseEquals(_Value left, _Value right, [_EqualityContext? context]) {
@@ -999,9 +1002,9 @@ bool _looseEquals(_Value left, _Value right, [_EqualityContext? context]) {
       case _ValueKind.string:
         return left.value == right.value;
       case _ValueKind.array:
-         return _structuralArrayEquals(left, right, context);
-       case _ValueKind.object:
-         return _structuralObjectEquals(left, right, context);
+        return _structuralArrayEquals(left, right, context);
+      case _ValueKind.object:
+        return _structuralObjectEquals(left, right, context);
     }
   }
   if (left.isNullish && right.isNullish) return true;
@@ -1021,7 +1024,8 @@ bool _looseEquals(_Value left, _Value right, [_EqualityContext? context]) {
   return false;
 }
 
-bool _structuralArrayEquals(_Value left, _Value right, _EqualityContext context) {
+bool _structuralArrayEquals(
+    _Value left, _Value right, _EqualityContext context) {
   final leftItems = left.value as List;
   final rightItems = right.value as List;
   if (identical(leftItems, rightItems)) return true;
@@ -1029,15 +1033,16 @@ bool _structuralArrayEquals(_Value left, _Value right, _EqualityContext context)
   context.pairs.add((leftItems, rightItems));
   if (leftItems.length != rightItems.length) return false;
   for (var index = 0; index < leftItems.length; index++) {
-    if (!_looseEquals(_arrayItem(leftItems[index]),
-        _arrayItem(rightItems[index]), context)) {
+    if (!_looseEquals(
+        _arrayItem(leftItems[index]), _arrayItem(rightItems[index]), context)) {
       return false;
     }
   }
   return true;
 }
 
-bool _structuralObjectEquals(_Value left, _Value right, _EqualityContext context) {
+bool _structuralObjectEquals(
+    _Value left, _Value right, _EqualityContext context) {
   final leftEntries = left.value as Map;
   final rightEntries = right.value as Map;
   if (identical(leftEntries, rightEntries)) return true;

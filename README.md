@@ -65,12 +65,14 @@ This port follows the [TypeScript reference](https://github.com/LieselThuriot/si
 
 | Behaviour | TypeScript | This port |
 | --- | --- | --- |
-| String to number | `Number("")` is `0`, `"Infinity"` is a keyword | A string converts only if it parses as a number; `""` and `"   "` are `NaN` |
+| String to number | Invalid numeric strings throw in numeric operators | Empty, blank, and invalid strings throw in numeric operators |
 | `parseExpression` | Returns `(model) => value` | Returns a `SimpleExpression`; call `evaluateValue(model)` for the raw value or `evaluate(model)` for truthiness |
 | Missing vs null | Distinguishable in results (`undefined` vs `null`) | Both surface as `null` from `evaluateValue`, and are equal under `eq` |
 | Model values | Any JavaScript object | String keys in Dart `Map` values resolve; list indexes are not traversed, and an unsupported runtime type is treated as an empty object |
 
 Numbers use the same formatting rule as the TypeScript reference: the shortest round-trip decimal, plain notation for magnitudes in `[1e-6, 1e21)`, and lowercase exponent notation outside that range.
+
+Structural equality applies to lists and maps and is cycle-safe. Numeric operators reject empty, blank, and invalid strings with `Invalid numeric value`; loose `eq` comparisons remain non-throwing.
 
 ## Model Access
 

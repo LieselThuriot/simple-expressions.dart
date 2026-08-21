@@ -11,10 +11,11 @@ void main() {
   final cases = (document['cases'] as List).cast<Map<String, dynamic>>();
 
   for (final item in cases) {
-    final expectations = ['value', 'truthy', 'error']
-        .where(item.containsKey)
-        .length;
-    expect(expectations, 1, reason: 'Each case must have one expectation');
+    final expectations =
+        ['value', 'truthy', 'error'].where(item.containsKey).length;
+    if (expectations != 1) {
+      throw StateError('Each case must have one expectation: ${item['id']}');
+    }
   }
 
   for (final item in cases) {

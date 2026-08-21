@@ -32,6 +32,17 @@ void main() {
     );
   });
 
+  test('handles cyclic objects without a depth limit', () {
+    final left = <String, Object?>{'value': 1};
+    final right = <String, Object?>{'value': 1};
+    left['self'] = left;
+    right['self'] = right;
+
+    expect(
+        executeExpression({'left': left, 'right': right}, 'eq(#left, #right)'),
+        isTrue);
+  });
+
   test('does not convert empty or blank strings to zero', () {
     expect(executeExpression({'value': ''}, 'eq(#value, 0)'), isFalse);
     expect(executeExpression({'value': '   '}, 'eq(#value, 0)'), isFalse);
