@@ -45,12 +45,12 @@ extension _OperatorCompiler on _ExpressionParser {
       case 'or':
       case 'and':
       case 'concat':
-      case 'sub':
-      case 'div':
-      case 'mod':
         return const _OperatorSpec(_OperatorArity.variadic);
       case 'add':
+      case 'sub':
       case 'mul':
+      case 'div':
+      case 'mod':
       case 'min':
       case 'max':
         return const _OperatorSpec(
@@ -158,7 +158,8 @@ extension _OperatorCompiler on _ExpressionParser {
           !runtimePattern.isTruthy) {
         return _falseValue;
       }
-      final regex = _runtimeRegExp(runtimePattern.value as String);
+      final regex =
+          SimpleExpressions._getRuntimeRegExp(runtimePattern.value as String);
       return regex.hasMatch(_regexInput(value(model)))
           ? _trueValue
           : _falseValue;
@@ -245,31 +246,33 @@ extension _OperatorCompiler on _ExpressionParser {
       List<_Compiled> arguments, _NumericOperation operation, String name) {
     return _Compiled((model) {
       final numbers = <double>[];
-      final expandsLists = operation == _NumericOperation.add ||
-          operation == _NumericOperation.multiply ||
-          operation == _NumericOperation.minimum ||
-          operation == _NumericOperation.maximum;
-
+      final activeLists = HashSet<List>.identity();
       for (final argument in arguments) {
         final value = argument(model);
-        if (expandsLists && value.kind == _ValueKind.array) {
-          final items = value.value as List;
-          for (final item in items) {
-            numbers.add(_mathNumber(_arrayItem(item), strict: true));
-          }
-        } else if (expandsLists && arguments.length == 1) {
+        if (arguments.length == 1 && value.kind != _ValueKind.array) {
           throw StateError('operator $name expects at least two arguments');
-        } else {
-          numbers.add(_mathNumber(value, strict: true));
         }
+        _flattenNumeric(value, numbers, activeLists);
       }
 
-      if ((operation == _NumericOperation.minimum ||
-              operation == _NumericOperation.maximum) &&
-          numbers.isEmpty) {
-        throw StateError(operation == _NumericOperation.minimum
-            ? 'Min requires at least one value'
-            : 'Max requires at least one value');
+      switch (operation) {
+        case _NumericOperation.subtract:
+        case _NumericOperation.divide:
+        case _NumericOperation.modulo:
+          if (numbers.length < 2) {
+            final operatorName = '${name[0].toUpperCase()}${name.substring(1)}';
+            throw StateError('$operatorName requires at least two values');
+          }
+        case _NumericOperation.minimum:
+          if (numbers.isEmpty) {
+            throw StateError('Min requires at least one value');
+          }
+        case _NumericOperation.maximum:
+          if (numbers.isEmpty) {
+            throw StateError('Max requires at least one value');
+          }
+        case _NumericOperation.add:
+        case _NumericOperation.multiply:
       }
 
       switch (operation) {
@@ -294,6 +297,24 @@ extension _OperatorCompiler on _ExpressionParser {
           return _Value.number(numbers.reduce(_javascriptMax));
       }
     });
+  }
+
+  static void _flattenNumeric(
+      _Value value, List<double> numbers, Set<List> activeLists) {
+    if (value.kind != _ValueKind.array) {
+      numbers.add(_mathNumber(value, strict: true));
+      return;
+    }
+
+    final items = value.value as List;
+    if (!activeLists.add(items)) throw StateError('Invalid numeric value');
+    try {
+      for (final item in items) {
+        _flattenNumeric(_arrayItem(item), numbers, activeLists);
+      }
+    } finally {
+      activeLists.remove(items);
+    }
   }
 
   static double _foldNumeric(

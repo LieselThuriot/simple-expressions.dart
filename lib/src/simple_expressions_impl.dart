@@ -8,7 +8,7 @@ part 'parser.dart';
 part 'runtime.dart';
 part 'tokenizer.dart';
 
-typedef _EvaluatorFunction = _Value Function(Map? model);
+typedef _EvaluatorFunction = _Value Function(Object? model);
 
 /// The error raised when an expression cannot be parsed.
 class ExpressionParseException extends FormatException {
@@ -51,12 +51,10 @@ class SimpleExpression {
   ///
   /// Arrays read from the model are returned as the model's live lists,
   /// not defensive copies.
-  Object? evaluateValue(Object? model) =>
-      _evaluator(model is Map ? model : null).toPublicValue();
+  Object? evaluateValue(Object? model) => _evaluator(model).toPublicValue();
 
   /// Evaluates the expression using JavaScript-like truthiness.
-  bool evaluate(Object? model) =>
-      _evaluator(model is Map ? model : null).isTruthy;
+  bool evaluate(Object? model) => _evaluator(model).isTruthy;
 }
 
 /// Parses expression text into a reusable evaluator.
@@ -78,6 +76,7 @@ class SimpleExpressions {
   static final LinkedHashMap<String, _Compiled> _parseCache = LinkedHashMap();
   static final LinkedHashMap<String, SimpleExpression> _expressionCache =
       LinkedHashMap();
+  static final LinkedHashMap<String, RegExp> _regexCache = LinkedHashMap();
 
   /// Returns a cached reusable expression when caching is enabled.
   static SimpleExpression get(Object expression) {
@@ -95,15 +94,12 @@ class SimpleExpressions {
     return result;
   }
 
-  /// Clears parsed-expression and/or reusable-expression caches.
-  static void clear({bool? parsed, bool? expression}) {
-    if (parsed == null && expression == null) {
-      _parseCache.clear();
-      _expressionCache.clear();
-      return;
-    }
-    if (parsed == true) _parseCache.clear();
-    if (expression == true) _expressionCache.clear();
+  /// Clears parsed-expression, reusable-expression, and/or runtime regex caches.
+  static void clear({bool? parsed, bool? expression, bool? regex}) {
+    final clearAll = parsed == null && expression == null && regex == null;
+    if (clearAll || parsed == true) _parseCache.clear();
+    if (clearAll || expression == true) _expressionCache.clear();
+    if (clearAll || regex == true) _regexCache.clear();
   }
 
   /// Disables caching and clears existing entries.
@@ -125,6 +121,7 @@ class SimpleExpressions {
     _cacheLimit = limit;
     _trimCache(_parseCache);
     _trimCache(_expressionCache);
+    _trimCache(_regexCache);
   }
 
   // Callers pass already-trimmed input.
@@ -139,6 +136,17 @@ class SimpleExpressions {
 
     final result = _ExpressionParser(expression).parse();
     if (_enabledCaches) _setCacheValue(_parseCache, expression, result);
+    return result;
+  }
+
+  static RegExp _getRuntimeRegExp(String pattern) {
+    if (_enabledCaches) {
+      final cached = _regexCache[pattern];
+      if (cached != null) return cached;
+    }
+
+    final result = RegExp(pattern);
+    if (_enabledCaches) _setCacheValue(_regexCache, pattern, result);
     return result;
   }
 

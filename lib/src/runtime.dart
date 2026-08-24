@@ -16,9 +16,6 @@ double _mathNumber(_Value value, {bool strict = false}) {
 }
 
 double _num(_Value value) {
-  if (value.kind == _ValueKind.array) {
-    throw StateError('Invalid numeric value');
-  }
   return _mathNumber(value, strict: true);
 }
 
@@ -74,7 +71,7 @@ class _Compiled {
   final _EvaluatorFunction function;
   final _Value? constantValue;
 
-  _Value call(Map? model) => function(model);
+  _Value call(Object? model) => function(model);
 }
 
 enum _ValueKind { missing, nullValue, boolean, number, string, array, object }
@@ -142,8 +139,8 @@ class _Value {
   }
 }
 
-_Value _resolveSingle(Map? model, String key) {
-  if (model == null) return const _Value.missing();
+_Value _resolveSingle(Object? model, String key) {
+  if (model is! Map) return const _Value.missing();
   final value = model[key];
   if (value == null && !model.containsKey(key)) {
     return const _Value.missing();
@@ -151,8 +148,8 @@ _Value _resolveSingle(Map? model, String key) {
   return _fromPublic(value);
 }
 
-_Value _resolvePath(Map? model, String path, List<String> segments) {
-  if (model == null) return const _Value.missing();
+_Value _resolvePath(Object? model, String path, List<String> segments) {
+  if (model is! Map) return const _Value.missing();
   // A member literally named the whole dotted path wins, matching upstream.
   final dotted = model[path];
   if (dotted != null || model.containsKey(path)) return _fromPublic(dotted);
@@ -237,23 +234,19 @@ void _writeConcatValue(StringBuffer buffer, _Value value) {
   if (value.isTruthy) buffer.write(_toJavaScriptString(value));
 }
 
-const int _runtimePatternCacheLimit = 64;
-final Map<String, RegExp> _runtimePatterns = <String, RegExp>{};
-
-/// Compiles and caches a model-supplied `match()` pattern. Patterns come from
-/// caller data, so the cache stays bounded: cleared wholesale when full.
-RegExp _runtimeRegExp(String pattern) {
-  final cached = _runtimePatterns[pattern];
-  if (cached != null) return cached;
-  final regex = RegExp(pattern);
-  if (_runtimePatterns.length >= _runtimePatternCacheLimit) {
-    _runtimePatterns.clear();
-  }
-  _runtimePatterns[pattern] = regex;
-  return regex;
-}
-
 double _toNumber(_Value value, {bool strict = false}) {
+  if (strict) {
+    if (value.kind == _ValueKind.number) {
+      final number = value.value as double;
+      if (number.isFinite) return number;
+    } else if (value.kind == _ValueKind.string) {
+      final text = (value.value as String).trim();
+      final number = double.tryParse(text);
+      if (text.isNotEmpty && number != null && number.isFinite) return number;
+    }
+    throw StateError('Invalid numeric value');
+  }
+
   switch (value.kind) {
     case _ValueKind.nullValue:
       return 0;
@@ -264,9 +257,6 @@ double _toNumber(_Value value, {bool strict = false}) {
     case _ValueKind.string:
       final text = (value.value as String).trim();
       final number = double.tryParse(text);
-      if (strict && (text.isEmpty || number == null || number.isNaN)) {
-        throw StateError('Invalid numeric value');
-      }
       return number ?? double.nan;
     default:
       return double.nan;

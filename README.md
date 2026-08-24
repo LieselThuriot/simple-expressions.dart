@@ -53,11 +53,11 @@ Constants support case-insensitive Booleans, signed, decimal, and exponent-form 
 
 Operators are case-insensitive. `and` and `or` are variadic and short-circuit. `if` is lazy and evaluates only its selected branch. `in` requires a list; `contains`, `startswith`, and `endswith` require a string left operand. `len` returns `0` for nullish values, a string/list length, or an exact `length` map key, and throws otherwise.
 
-`not`, `empty`, `defined`, `lower`, `upper`, `trim`, `int`, `num`, `abs`, `floor`, `ceil`, and `sqrt` take one argument. `num` accepts scalar values only and rejects lists. `eq`, `contains`, `startswith`, `endswith`, `in`, `gt`, `lt`, `match`, `round`, and `pow` take two. `clamp` and `if` take three. `concat`, `add`, `sub`, `mul`, `div`, `mod`, `min`, and `max` take two or more; `add`, `mul`, `min`, and `max` also accept one list and expand lists one level.
+`not`, `empty`, `defined`, `lower`, `upper`, `trim`, `int`, `num`, `abs`, `floor`, `ceil`, and `sqrt` take one argument. `num` accepts scalar values only. `eq`, `contains`, `startswith`, `endswith`, `in`, `gt`, `lt`, `match`, `round`, and `pow` take two. `clamp` and `if` take three. `concat`, `add`, `sub`, `mul`, `div`, `mod`, `min`, and `max` take two or more expression arguments. Each numeric variadic operator also accepts one expression that evaluates to a list.
 
 `in` uses the same loose equality as `eq`. `trim` preserves null and missing values; other falsey values become empty strings before trimming. `defined` is false only for null and missing values. Lists may contain nested lists, model references, and operator expressions. Numeric operators throw `Invalid numeric value` for empty, blank, or invalid strings. `div` and `mod` throw `Division by zero` for zero divisors; `min` and `max` throw for empty lists.
 
-Numeric operators convert values using the port's Dart numeric rules. Strict numeric string conversion rejects `NaN`. `add`, `mul`, `min`, and `max` expand list arguments one level and accept a single list argument. `round` requires a non-negative safe-integer precision, and `div`/`mod` throw for a zero divisor.
+Numeric inputs must be finite numbers or strings containing finite numbers. Booleans, null, missing values, maps, lists used as leaves, blank or invalid strings, `NaN`, and infinities throw `Invalid numeric value`. Numeric variadic operators flatten list arguments recursively in depth-first order and reject active cyclic lists. `sub`, `div`, and `mod` require at least two flattened leaves; `min` and `max` require one. Empty lists therefore give the `add` identity `0` and `mul` identity `1`. Calculations may produce `NaN` or infinity as top-level results, but enclosing numeric operators reject those results as inputs. `round` requires a non-negative safe-integer precision, and `div`/`mod` throw for a zero divisor.
 
 The evaluator uses JavaScript-style truthiness, loose equality, and value conversion where those rules can be represented by Dart values. Numeric values are evaluated as Dart `double` values. `match` uses Dart `RegExp`, so patterns that rely on JavaScript-specific regex syntax are not portable.
 
@@ -74,7 +74,7 @@ This port follows the [TypeScript reference](https://github.com/LieselThuriot/si
 
 Numbers use the same formatting rule as the TypeScript reference: the shortest round-trip decimal, plain notation for magnitudes in `[1e-6, 1e21)`, and lowercase exponent notation outside that range.
 
-Structural equality applies to lists and maps and is cycle-safe. Numeric operators reject empty, blank, and invalid strings with `Invalid numeric value`; loose `eq` comparisons remain non-throwing. Unlike the TypeScript reference, Dart treats empty and blank strings as unequal to numeric zero in `eq`.
+Structural equality applies recursively to lists and maps and is cycle-safe; cyclic graphs are compared by already-visited identity pairs rather than by requiring identical aliasing topology. Loose `eq` conversions remain non-throwing and are separate from strict numeric-operator input validation. Unlike the TypeScript reference, Dart treats empty and blank strings as unequal to numeric zero in `eq`.
 
 ## Model Access
 
@@ -88,10 +88,11 @@ Keep these details in mind:
 - List indexes and list properties are not traversed through references.
 - A value with an unsupported Dart runtime type is treated as an empty object.
 - Missing references surface as `null` from `evaluateValue`. Internally, missing and explicit null remain distinct, but `eq`, `defined`, and `empty` treat them the same.
+- A null or other non-map model root is preserved by the API but cannot resolve references, so references evaluate as missing.
 
 ## Caching
 
-Parsed evaluators and expression wrappers returned by `SimpleExpressions.get` are cached by default. Both caches use a FIFO limit of 1,000 entries; cache hits do not refresh FIFO order. Use `clear({ parsed: true, expression: true })` for selective clearing, `setCacheLimit` to change the limit, and `disableCaches`/`enableCaches` to control caching. Disabling caches also clears existing entries.
+Parsed evaluators, expression wrappers returned by `SimpleExpressions.get`, and model-supplied runtime regexes are cached by default. All three caches use the configured FIFO limit of 1,000 entries; cache hits do not refresh FIFO order. Use `clear({ parsed: true, expression: true, regex: true })` for selective clearing, `setCacheLimit` to change every cache limit, and `disableCaches`/`enableCaches` to control all caching. Disabling caches also clears existing entries. Literal `match` patterns are compiled eagerly while parsing and retained by their compiled evaluator; they do not enter the runtime regex cache.
 
 ## Security
 

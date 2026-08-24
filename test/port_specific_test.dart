@@ -2,6 +2,12 @@ import 'package:simple_expressions/simple_expressions.dart';
 import 'package:test/test.dart';
 
 void main() {
+  tearDown(() {
+    SimpleExpressions.disableCaches();
+    SimpleExpressions.setCacheLimit(1000);
+    SimpleExpressions.enableCaches();
+  });
+
   test('supports structural equality for port models', () {
     expect(
       executeExpression({
@@ -48,6 +54,11 @@ void main() {
     expect(executeExpression({'value': '   '}, 'eq(#value, 0)'), isFalse);
   });
 
+  test('accepts a null model root without replacing it', () {
+    expect(parseExpression('defined(#value)').evaluateValue(null), isFalse);
+    expect(executeExpression(null, 'empty(#value)'), isTrue);
+  });
+
   test('positive cache limits do not re-enable caching', () {
     SimpleExpressions.disableCaches();
     SimpleExpressions.setCacheLimit(10);
@@ -64,6 +75,30 @@ void main() {
     expect(SimpleExpressions.get('true'), same(SimpleExpressions.get('true')));
   });
 
+  test('cache clear, disable, and FIFO limit lifecycle is consistent', () {
+    SimpleExpressions.enableCaches();
+    SimpleExpressions.clear();
+    SimpleExpressions.setCacheLimit(2);
+
+    final first = SimpleExpressions.get('true');
+    final second = SimpleExpressions.get('false');
+    expect(SimpleExpressions.get('true'), same(first));
+
+    SimpleExpressions.get('eq(1, 1)');
+    expect(SimpleExpressions.get('false'), same(second));
+    expect(SimpleExpressions.get('true'), isNot(same(first)));
+
+    SimpleExpressions.clear(parsed: true);
+    final cached = SimpleExpressions.get('true');
+    SimpleExpressions.clear(expression: true);
+    expect(SimpleExpressions.get('true'), isNot(same(cached)));
+
+    final beforeDisable = SimpleExpressions.get('false');
+    SimpleExpressions.disableCaches();
+    SimpleExpressions.enableCaches();
+    expect(SimpleExpressions.get('false'), isNot(same(beforeDisable)));
+  });
+
   test('supports unary mathematical operators', () {
     expect(parseExpression('int(-2.9)').evaluateValue({}), -2.0);
     expect(parseExpression('num("2.5")').evaluateValue({}), 2.5);
@@ -73,24 +108,110 @@ void main() {
     expect(parseExpression('sqrt(9)').evaluateValue({}), 3.0);
   });
 
-  test('num rejects lists and NaN strings', () {
+  test('numeric scalars must be finite numbers or finite numeric strings', () {
     expect(
         () => parseExpression('num([1])').evaluateValue({}), throwsStateError);
-    expect(() => parseExpression('num(#value)').evaluateValue({'value': []}),
+    for (final value in <Object?>[
+      true,
+      null,
+      const <String, Object?>{},
+      const <Object?>[],
+      '',
+      '   ',
+      'invalid',
+      'NaN',
+      'Infinity',
+      double.nan,
+      double.infinity,
+      double.negativeInfinity,
+    ]) {
+      expect(
+        () => parseExpression('num(#value)').evaluateValue({'value': value}),
+        throwsA(
+            predicate((error) => '$error'.contains('Invalid numeric value'))),
+        reason: 'accepted $value',
+      );
+    }
+    expect(() => parseExpression('num(#missing)').evaluateValue({}),
         throwsStateError);
-    expect(() => parseExpression('num("NaN")').evaluateValue({}),
+    expect(() => parseExpression('num(1e999)').evaluateValue({}),
         throwsStateError);
+    expect(parseExpression('num(" 2.5 ")').evaluateValue({}), 2.5);
   });
 
-  test('supports arithmetic operators and numeric list expansion', () {
-    expect(parseExpression('add([1, 2, 3], 4)').evaluateValue({}), 10.0);
-    expect(parseExpression('add([1, 2, 3])').evaluateValue({}), 6.0);
+  test('recursively flattens numeric lists depth first', () {
+    final model = {
+      'values': [
+        20,
+        [
+          5,
+          [2]
+        ]
+      ],
+    };
+
+    expect(parseExpression('add([1, [2, [3]]], 4)').evaluateValue({}), 10.0);
+    expect(parseExpression('add(#values)').evaluateValue(model), 27.0);
     expect(parseExpression('sub(20, 5, 2)').evaluateValue({}), 13.0);
-    expect(parseExpression('mul([2, 3])').evaluateValue({}), 6.0);
+    expect(parseExpression('sub(#values)').evaluateValue(model), 13.0);
+    expect(parseExpression('mul([[2], [3]])').evaluateValue({}), 6.0);
     expect(parseExpression('div(20, 5, 2)').evaluateValue({}), 2.0);
+    expect(parseExpression('div(#values)').evaluateValue(model), 2.0);
     expect(parseExpression('mod(17, 5)').evaluateValue({}), 2.0);
+    expect(parseExpression('mod([[17], [5]])').evaluateValue({}), 2.0);
     expect(parseExpression('min([4, 2, 8])').evaluateValue({}), 2.0);
     expect(parseExpression('max(1, [4, 2], 3)').evaluateValue({}), 4.0);
+    expect(parseExpression('add([])').evaluateValue({}), 0.0);
+    expect(parseExpression('mul([])').evaluateValue({}), 1.0);
+  });
+
+  test('rejects invalid numeric leaves and active list cycles', () {
+    for (final expression in [
+      'add(#values)',
+      'sub(#values)',
+      'mul(#values)',
+      'div(#values)',
+      'mod(#values)',
+      'min(#values)',
+      'max(#values)',
+    ]) {
+      expect(
+        () => parseExpression(expression).evaluateValue({
+          'values': [1, true]
+        }),
+        throwsA(
+            predicate((error) => '$error'.contains('Invalid numeric value'))),
+      );
+    }
+
+    final cyclic = <Object?>[1];
+    cyclic.add(cyclic);
+    expect(
+      () => parseExpression('add(#values)').evaluateValue({'values': cyclic}),
+      throwsA(predicate((error) => '$error'.contains('Invalid numeric value'))),
+    );
+
+    final shared = <Object?>[1, 2];
+    expect(
+        parseExpression('add(#values)').evaluateValue({
+          'values': [shared, shared]
+        }),
+        6.0);
+  });
+
+  test('enforces numeric leaf counts after flattening', () {
+    expect(parseExpression('min([[1]])').evaluateValue({}), 1.0);
+    expect(parseExpression('max([[1]])').evaluateValue({}), 1.0);
+    for (final expression in ['sub([1])', 'div([1])', 'mod([1])']) {
+      expect(
+        () => parseExpression(expression).evaluateValue({}),
+        throwsA(predicate((error) => '$error'.contains('at least two values'))),
+      );
+    }
+    for (final expression in ['min([])', 'max([])']) {
+      expect(() => parseExpression(expression).evaluateValue({}),
+          throwsStateError);
+    }
   });
 
   test('supports round, power, and clamp', () {
@@ -105,23 +226,62 @@ void main() {
     expect(
         parseExpression('mod(#value, 3)').evaluateValue({'value': 1e308}), 2.0);
     expect(
-        parseExpression('mod(7, #value)')
-            .evaluateValue({'value': double.infinity}),
-        7.0);
+      () => parseExpression('mod(7, pow(1e308, 2))').evaluateValue({}),
+      throwsA(predicate((error) => '$error'.contains('Invalid numeric value'))),
+    );
     expect(
-        (parseExpression('mod(#value, 3)')
-                .evaluateValue({'value': double.infinity}) as double)
-            .isNaN,
-        isTrue);
+      () => parseExpression('mod(pow(1e308, 2), 3)').evaluateValue({}),
+      throwsA(predicate((error) => '$error'.contains('Invalid numeric value'))),
+    );
   });
 
-  test('min and max propagate NaN and preserve signed zero', () {
-    expect(
-        (parseExpression('min(sqrt(-1), 1)').evaluateValue({}) as double).isNaN,
+  test('allows nonfinite results only at the top numeric level', () {
+    expect((parseExpression('sqrt(-1)').evaluateValue({}) as double).isNaN,
         isTrue);
     expect(
-        (parseExpression('max(1, sqrt(-1))').evaluateValue({}) as double).isNaN,
+        (parseExpression('pow(1e308, 2)').evaluateValue({}) as double)
+            .isInfinite,
         isTrue);
+    for (final expression in [
+      'abs(sqrt(-1))',
+      'add(pow(1e308, 2), 1)',
+      'pow(2, sqrt(-1))',
+      'clamp(pow(1e308, 2), 0, 1)',
+    ]) {
+      expect(
+        () => parseExpression(expression).evaluateValue({}),
+        throwsA(
+            predicate((error) => '$error'.contains('Invalid numeric value'))),
+        reason: expression,
+      );
+    }
+  });
+
+  test('literal regexes compile eagerly and runtime regexes use cache controls',
+      () {
+    expect(() => parseExpression('match("x", "[")'), throwsFormatException);
+    final expression = parseExpression('match("x", #pattern)');
+    expect(() => expression.evaluateValue({'pattern': '['}),
+        throwsFormatException);
+
+    SimpleExpressions.enableCaches();
+    SimpleExpressions.setCacheLimit(1);
+    expect(expression.evaluateValue({'pattern': 'x'}), isTrue);
+    expect(expression.evaluateValue({'pattern': 'y'}), isFalse);
+    SimpleExpressions.clear(regex: true);
+    SimpleExpressions.disableCaches();
+    expect(expression.evaluateValue({'pattern': 'x'}), isTrue);
+  });
+
+  test('min and max reject nonfinite inputs and preserve signed zero', () {
+    expect(
+        () => parseExpression('min(sqrt(-1), 1)').evaluateValue({}),
+        throwsA(
+            predicate((error) => '$error'.contains('Invalid numeric value'))));
+    expect(
+        () => parseExpression('max(1, sqrt(-1))').evaluateValue({}),
+        throwsA(
+            predicate((error) => '$error'.contains('Invalid numeric value'))));
 
     final minimum = parseExpression('min(#positive, #negative)')
         .evaluateValue({'positive': 0.0, 'negative': -0.0}) as double;
