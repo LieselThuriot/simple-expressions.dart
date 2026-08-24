@@ -108,6 +108,21 @@ void main() {
     expect(parseExpression('sqrt(9)').evaluateValue({}), 3.0);
   });
 
+  test('numeric strings use JavaScript radix grammar', () {
+    for (final entry in {
+      '0x10': 16.0,
+      '0X10000000000000000': 18446744073709551616.0,
+      '0b10': 2.0,
+      '0o10': 8.0,
+    }.entries) {
+      final model = {'value': entry.key};
+      expect(parseExpression('num(#value)').evaluateValue(model), entry.value);
+      expect(parseExpression('add(#value, 1)').evaluateValue(model),
+          entry.value + 1);
+      expect(executeExpression(model, 'eq(#value, ${entry.value})'), isTrue);
+    }
+  });
+
   test('numeric scalars must be finite numbers or finite numeric strings', () {
     expect(
         () => parseExpression('num([1])').evaluateValue({}), throwsStateError);
@@ -214,10 +229,27 @@ void main() {
     }
   });
 
+  test('one scalar argument reports the portable list alternative', () {
+    for (final operator in ['add', 'sub', 'mul', 'div', 'mod', 'min', 'max']) {
+      expect(
+        () => parseExpression('$operator(1)').evaluateValue({}),
+        throwsA(predicate((error) => '$error'.contains(
+            'operator $operator expects at least two arguments or one list argument'))),
+      );
+    }
+  });
+
   test('supports round, power, and clamp', () {
     expect(parseExpression('round(12.345, 2)').evaluateValue({}), 12.35);
     expect(parseExpression('pow(2, 3)').evaluateValue({}), 8.0);
     expect(parseExpression('clamp(12, 0, 10)').evaluateValue({}), 10.0);
+  });
+
+  test('round preserves JavaScript negative zero', () {
+    final result =
+        parseExpression('round(-0.5, 0)').evaluateValue({}) as double;
+    expect(result, 0.0);
+    expect(result.isNegative, isTrue);
   });
 
   test('matches JavaScript remainder edge cases', () {
@@ -257,19 +289,15 @@ void main() {
     }
   });
 
-  test('literal regexes compile eagerly and runtime regexes use cache controls',
+  test('literal regexes compile eagerly and runtime regexes compile on use',
       () {
     expect(() => parseExpression('match("x", "[")'), throwsFormatException);
     final expression = parseExpression('match("x", #pattern)');
     expect(() => expression.evaluateValue({'pattern': '['}),
         throwsFormatException);
 
-    SimpleExpressions.enableCaches();
-    SimpleExpressions.setCacheLimit(1);
     expect(expression.evaluateValue({'pattern': 'x'}), isTrue);
     expect(expression.evaluateValue({'pattern': 'y'}), isFalse);
-    SimpleExpressions.clear(regex: true);
-    SimpleExpressions.disableCaches();
     expect(expression.evaluateValue({'pattern': 'x'}), isTrue);
   });
 

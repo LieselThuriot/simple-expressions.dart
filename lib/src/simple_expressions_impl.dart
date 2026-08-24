@@ -76,7 +76,6 @@ class SimpleExpressions {
   static final LinkedHashMap<String, _Compiled> _parseCache = LinkedHashMap();
   static final LinkedHashMap<String, SimpleExpression> _expressionCache =
       LinkedHashMap();
-  static final LinkedHashMap<String, RegExp> _regexCache = LinkedHashMap();
 
   /// Returns a cached reusable expression when caching is enabled.
   static SimpleExpression get(Object expression) {
@@ -94,12 +93,11 @@ class SimpleExpressions {
     return result;
   }
 
-  /// Clears parsed-expression, reusable-expression, and/or runtime regex caches.
-  static void clear({bool? parsed, bool? expression, bool? regex}) {
-    final clearAll = parsed == null && expression == null && regex == null;
+  /// Clears parsed-expression and/or reusable-expression caches.
+  static void clear({bool? parsed, bool? expression}) {
+    final clearAll = parsed == null && expression == null;
     if (clearAll || parsed == true) _parseCache.clear();
     if (clearAll || expression == true) _expressionCache.clear();
-    if (clearAll || regex == true) _regexCache.clear();
   }
 
   /// Disables caching and clears existing entries.
@@ -115,13 +113,13 @@ class SimpleExpressions {
 
   /// Sets the FIFO cache limit. Values below 1 throw and do not change cache state.
   static void setCacheLimit(int limit) {
-    if (limit < 1) {
-      throw ArgumentError.value(limit, 'limit', 'must be at least 1');
+    if (limit < 1 || limit > 9007199254740991) {
+      throw ArgumentError.value(limit, 'limit',
+          limit < 1 ? 'must be at least 1' : 'must be a safe integer');
     }
     _cacheLimit = limit;
     _trimCache(_parseCache);
     _trimCache(_expressionCache);
-    _trimCache(_regexCache);
   }
 
   // Callers pass already-trimmed input.
@@ -136,17 +134,6 @@ class SimpleExpressions {
 
     final result = _ExpressionParser(expression).parse();
     if (_enabledCaches) _setCacheValue(_parseCache, expression, result);
-    return result;
-  }
-
-  static RegExp _getRuntimeRegExp(String pattern) {
-    if (_enabledCaches) {
-      final cached = _regexCache[pattern];
-      if (cached != null) return cached;
-    }
-
-    final result = RegExp(pattern);
-    if (_enabledCaches) _setCacheValue(_regexCache, pattern, result);
     return result;
   }
 

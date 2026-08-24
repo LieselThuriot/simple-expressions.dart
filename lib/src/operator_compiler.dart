@@ -158,8 +158,7 @@ extension _OperatorCompiler on _ExpressionParser {
           !runtimePattern.isTruthy) {
         return _falseValue;
       }
-      final regex =
-          SimpleExpressions._getRuntimeRegExp(runtimePattern.value as String);
+      final regex = RegExp(runtimePattern.value as String);
       return regex.hasMatch(_regexInput(value(model)))
           ? _trueValue
           : _falseValue;
@@ -250,7 +249,8 @@ extension _OperatorCompiler on _ExpressionParser {
       for (final argument in arguments) {
         final value = argument(model);
         if (arguments.length == 1 && value.kind != _ValueKind.array) {
-          throw StateError('operator $name expects at least two arguments');
+          throw StateError(
+              'operator $name expects at least two arguments or one list argument');
         }
         _flattenNumeric(value, numbers, activeLists);
       }

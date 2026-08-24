@@ -58,7 +58,8 @@ _Value _round(_Value value, _Value decimals) {
     throw StateError('Round precision is too large');
   }
   final number = _mathNumber(value, strict: true);
-  return _Value.number((number * factor + 0.5).floorToDouble() / factor);
+  final result = (number * factor + 0.5).floorToDouble() / factor;
+  return _Value.number(result == 0 && number.isNegative ? -0.0 : result);
 }
 
 class _Compiled {
@@ -241,7 +242,7 @@ double _toNumber(_Value value, {bool strict = false}) {
       if (number.isFinite) return number;
     } else if (value.kind == _ValueKind.string) {
       final text = (value.value as String).trim();
-      final number = double.tryParse(text);
+      final number = _parseJavaScriptNumber(text);
       if (text.isNotEmpty && number != null && number.isFinite) return number;
     }
     throw StateError('Invalid numeric value');
@@ -256,11 +257,26 @@ double _toNumber(_Value value, {bool strict = false}) {
       return value.value as double;
     case _ValueKind.string:
       final text = (value.value as String).trim();
-      final number = double.tryParse(text);
+      final number = _parseJavaScriptNumber(text);
       return number ?? double.nan;
     default:
       return double.nan;
   }
+}
+
+double? _parseJavaScriptNumber(String text) {
+  if (text.length > 2 && text.startsWith('0')) {
+    final radix = switch (text[1]) {
+      'x' || 'X' => 16,
+      'b' || 'B' => 2,
+      'o' || 'O' => 8,
+      _ => null,
+    };
+    if (radix != null) {
+      return BigInt.tryParse(text.substring(2), radix: radix)?.toDouble();
+    }
+  }
+  return double.tryParse(text);
 }
 
 String _toJavaScriptString(_Value value) {
