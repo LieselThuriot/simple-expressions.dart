@@ -1,0 +1,41 @@
+services:
+  dart:
+    image: dart:stable
+    working_dir: /app
+    volumes:
+      - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
+      - dart-pub-cache:/root/.pub-cache
+    entrypoint: /usr/lib/dart/bin/dart
+
+  shell:
+    image: dart:stable
+    working_dir: /app
+    volumes:
+      - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
+      - dart-pub-cache:/root/.pub-cache
+    entrypoint: /bin/sh
+
+  pana:
+    image: dart:stable
+    working_dir: /app
+    volumes:
+      - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
+      - dart-pub-cache:/root/.pub-cache
+    entrypoint: /bin/sh
+    command:
+      - -lc
+      - export PATH=/usr/lib/dart/bin:/root/.pub-cache/bin:$$PATH && dart pub global activate pana && pana .
+
+  verify:
+    image: dart:stable
+    working_dir: /app
+    volumes:
+      - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
+      - dart-pub-cache:/root/.pub-cache
+    entrypoint: /bin/sh
+    command:
+      - -lc
+      - /usr/lib/dart/bin/dart pub get && /usr/lib/dart/bin/dart format . && /usr/lib/dart/bin/dart analyze && /usr/lib/dart/bin/dart test
+
+volumes:
+  dart-pub-cache:

@@ -18,7 +18,11 @@ class _ExpressionParser {
         _tokenizer.next();
         return _Compiled.constant(_Value.string(value));
       case _TokenKind.number:
-        final value = double.parse(_tokenizer.value);
+        final value = _parseDecimalLiteral(_tokenizer.value);
+        if (!value.isFinite) {
+          throw ExpressionParseException.withoutPosition(
+              'Invalid numeric value');
+        }
         _tokenizer.next();
         return _Compiled.constant(_Value.number(value));
       case _TokenKind.reference:

@@ -1,5 +1,6 @@
 import 'dart:collection';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 part 'operator_compiler.dart';
 part 'equality.dart';
@@ -26,6 +27,12 @@ class ExpressionParseException extends FormatException {
   final int position;
 }
 
+/// The error raised when a parsed expression fails while it is evaluated.
+class ExpressionEvaluationException extends StateError {
+  /// Creates an evaluation exception with [message].
+  ExpressionEvaluationException(super.message);
+}
+
 /// A reusable parsed expression.
 class SimpleExpression {
   SimpleExpression._compiled(this._evaluator);
@@ -35,13 +42,14 @@ class SimpleExpression {
     if (expression is bool) {
       _evaluator = _Compiled.constant(expression ? _trueValue : _falseValue);
     } else if (expression is String) {
-      final normalized = expression.trim();
+      final normalized = _trimPortableWhitespace(expression);
       if (normalized.isEmpty) {
         throw ExpressionParseException.withoutPosition('whitespace');
       }
       _evaluator = SimpleExpressions._getParsedExpression(normalized);
     } else {
-      throw ArgumentError('Invalid Expression: unsupported type');
+      throw ArgumentError(
+          'Invalid Expression: unsupported type ${expression.runtimeType}');
     }
   }
 
@@ -59,8 +67,8 @@ class SimpleExpression {
 
 /// Parses expression text into a reusable evaluator.
 SimpleExpression parseExpression(String expression) =>
-    SimpleExpression._compiled(
-        SimpleExpressions._getParsedExpression(expression.trim()));
+    SimpleExpression._compiled(SimpleExpressions._getParsedExpression(
+        _trimPortableWhitespace(expression)));
 
 /// Evaluates an expression and returns its truthiness.
 bool executeExpression(Object? model, Object expression) =>
@@ -80,7 +88,8 @@ class SimpleExpressions {
   /// Returns a cached reusable expression when caching is enabled.
   static SimpleExpression get(Object expression) {
     if (expression is! String && expression is! bool) {
-      throw ArgumentError('Invalid Expression: unsupported type');
+      throw ArgumentError(
+          'Invalid Expression: unsupported type ${expression.runtimeType}');
     }
     final key = expression is String ? expression : '$expression';
     if (_enabledCaches) {

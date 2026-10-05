@@ -49,32 +49,35 @@ The sample is included in the published package's Example tab.
 
 ## Syntax
 
-Constants support case-insensitive Booleans, signed, decimal, and exponent-form numeric literals, single-, double-, or backtick-quoted strings, and recursive list literals in square brackets. References begin with `#`. For a dotted reference, the evaluator first checks for an exact dotted key and then traverses nested map values. References cannot contain empty segments or the reserved segments `__proto__`, `constructor`, and `prototype`; those restrictions are retained for compatibility with the TypeScript reference.
+Constants support case-insensitive Booleans, finite signed decimal and exponent-form numeric literals (including `.5` and `5.`), single-, double-, or backtick-quoted strings, and recursive list literals in square brackets. References begin with `#`. For a dotted reference, the evaluator first checks for an exact dotted key and then traverses nested map values. References cannot contain empty segments or the reserved segments `__proto__`, `constructor`, and `prototype`; those restrictions are retained for compatibility with the TypeScript reference.
 
 Operators are case-insensitive. `and` and `or` are variadic and short-circuit. `if` is lazy and evaluates only its selected branch. `in` requires a list; `contains`, `startswith`, and `endswith` require a string left operand. `len` returns `0` for nullish values, a string/list length, or an exact `length` map key, and throws otherwise.
 
 `not`, `empty`, `defined`, `lower`, `upper`, `trim`, `int`, `num`, `abs`, `floor`, `ceil`, and `sqrt` take one argument. `num` accepts scalar values only. `eq`, `contains`, `startswith`, `endswith`, `in`, `gt`, `lt`, `match`, `round`, and `pow` take two. `clamp` and `if` take three. `concat`, `add`, `sub`, `mul`, `div`, `mod`, `min`, and `max` take two or more expression arguments. Each numeric variadic operator also accepts one expression that evaluates to a list.
 
-`in` uses the same loose equality as `eq`. `trim` preserves null and missing values; other falsey values become empty strings before trimming. `defined` is false only for null and missing values. Lists may contain nested lists, model references, and operator expressions. Numeric operators throw `Invalid numeric value` for empty, blank, or invalid strings. `div` and `mod` throw `Division by zero` for zero divisors; `min` and `max` throw for empty lists.
+`in` uses the same equality as `eq`. Null and missing are equal only to each other. Primitive values compare directly when they have the same kind; finite numbers also compare with valid finite decimal strings, and Booleans coerce only against finite numbers or valid finite decimal strings. Blank strings are nonnumeric. Lists compare structurally only with lists, maps only with maps, and structural comparison is cycle-safe. Collections never coerce to scalars for equality.
 
-Numeric inputs must be finite numbers or strings accepted by JavaScript `Number`, including decimal, exponent, hexadecimal, binary, and octal forms. Booleans, null, missing values, maps, lists used as leaves, blank or invalid strings, `NaN`, and infinities throw `Invalid numeric value`. Numeric variadic operators flatten list arguments recursively in depth-first order and reject active cyclic lists. `sub`, `div`, and `mod` require at least two flattened leaves; `min` and `max` require one. Empty lists therefore give the `add` identity `0` and `mul` identity `1`. Calculations may produce `NaN` or infinity as top-level results, but enclosing numeric operators reject those results as inputs. `round` requires a non-negative safe-integer precision, and `div`/`mod` throw for a zero divisor.
+Strict numeric operators accept finite numbers or finite signed decimal/exponent strings using the literal grammar. Radix strings, blank strings, Booleans, null, missing values, collections used as leaves, and nonfinite values throw `Invalid numeric value`. Every numeric result must also be finite or the operator throws `Invalid numeric result`; `div` and `mod` keep the more specific `Division by zero` error. Numeric variadic operators first evaluate every expression, then recursively flatten all list arguments depth-first, and only then convert leaves. One expression argument is valid syntax but must evaluate to a list. `sub`, `div`, and `mod` require at least two flattened leaves; `min` and `max` require one. Empty lists therefore give `add` the identity `0` and `mul` the identity `1`.
 
-The evaluator uses JavaScript-style truthiness, loose equality, and value conversion where those rules can be represented by Dart values. Numeric values are evaluated as Dart `double` values. `match` uses Dart `RegExp`, so patterns that rely on JavaScript-specific regex syntax are not portable.
+`round` accepts an integer precision from 0 through 308 and rounds exact runtime-number midpoint ties away from zero without multiplying the input by a potentially overflowing scale. Comparisons are ordinal for two strings and numeric for finite number/valid-decimal-string pairs; Booleans, nullish values, blank or invalid strings, and collections make `gt` and `lt` false. Numeric scalar results normalize `-0.0` to `0.0`.
+
+Expression boundaries, tokenizer delimiters, `trim`, and numeric strings use the explicit Unicode White_Space set U+0009-U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000-U+200A, U+2028, U+2029, U+202F, U+205F, and U+3000. U+FEFF is not whitespace. Text conversion detects active cyclic lists and throws `Cyclic list value`; repeated lists that are no longer active are allowed.
+
+The evaluator retains JavaScript-style truthiness: null, missing, false, numeric zero, `NaN`, and empty strings are falsey; lists and maps are truthy. Numeric values are evaluated as Dart `double` values. `trim` preserves null and missing values; other falsey values become empty strings before trimming. `defined` is false only for null and missing values. `match` uses Dart `RegExp`, so patterns that rely on JavaScript-specific regex syntax are not portable.
 
 ## Differences from the TypeScript reference
 
-This port follows the [TypeScript reference](https://github.com/LieselThuriot/simple-expressions) for grammar, operators, evaluation order, and selected safety rules. The main portability differences are Dart map/value representation, Dart `RegExp`, and the documented empty-string equality rule. Cross-language compatibility is tested separately in [simple-expressions-conformance](https://github.com/LieselThuriot/simple-expressions-conformance).
+This port follows the portable behavior defined by [simple-expressions-conformance](https://github.com/LieselThuriot/simple-expressions-conformance). The remaining platform differences are Dart model representation, Dart `RegExp`, and the public evaluator shape.
 
 | Behaviour | TypeScript | This port |
 | --- | --- | --- |
-| Equality of empty strings and zero | `eq("", 0)` is true through JavaScript loose equality | `eq("", 0)` is false |
 | `parseExpression` | Returns `(model) => value` | Returns a `SimpleExpression`; call `evaluateValue(model)` for the raw value or `evaluate(model)` for truthiness |
 | Missing vs null | Distinguishable in results (`undefined` vs `null`) | Both surface as `null` from `evaluateValue`, and are equal under `eq` |
 | Model values | Any JavaScript object | String keys in Dart `Map` values resolve; list indexes are not traversed, and an unsupported runtime type is treated as an empty object |
 
 Numbers use the same formatting rule as the TypeScript reference: the shortest round-trip decimal, plain notation for magnitudes in `[1e-6, 1e21)`, and lowercase exponent notation outside that range.
 
-Structural equality applies recursively to lists and maps and is cycle-safe; cyclic graphs are compared by already-visited identity pairs rather than by requiring identical aliasing topology. Loose `eq` conversions remain non-throwing and are separate from strict numeric-operator input validation. Unlike the TypeScript reference, Dart treats empty and blank strings as unequal to numeric zero in `eq`.
+Structural equality applies recursively to lists and maps and is cycle-safe; cyclic graphs are compared by already-visited identity pairs rather than by requiring identical aliasing topology. Equality conversion remains non-throwing and is separate from strict numeric-operator input validation.
 
 ## Model Access
 
@@ -85,6 +88,7 @@ Model values can be Dart maps and lists, along with strings, numbers, booleans, 
 Keep these details in mind:
 
 - Model values are read live at evaluation time. Mutations made between evaluations are visible to the next evaluation.
+- Scalar numeric values normalize negative zero. Because live model lists and maps are not copied or traversed on return, a `-0.0` nested inside one may remain observable.
 - List indexes and list properties are not traversed through references.
 - A value with an unsupported Dart runtime type is treated as an empty object.
 - Missing references surface as `null` from `evaluateValue`. Internally, missing and explicit null remain distinct, but `eq`, `defined`, and `empty` treat them the same.
@@ -92,13 +96,73 @@ Keep these details in mind:
 
 ## Caching
 
-Parsed evaluators and expression wrappers returned by `SimpleExpressions.get` are cached by default. Both caches use the configured FIFO limit of 1,000 entries; cache hits do not refresh FIFO order. Use `clear(parsed: true, expression: true)` for selective clearing, `setCacheLimit` to change both limits, and `disableCaches`/`enableCaches` to control caching. Disabling caches also clears existing entries. Literal `match` patterns are compiled eagerly into their parsed evaluator; model-supplied patterns are compiled when evaluated.
+Parsed evaluators and expression wrappers returned by `SimpleExpressions.get` are cached by default. Both caches use the configured FIFO limit of 1,000 entries; cache hits do not refresh FIFO order. Boolean expressions and their lowercase equivalent strings share expression-cache keys (`true` with `"true"`, and `false` with `"false"`). Use `clear(parsed: true, expression: true)` for selective clearing, `setCacheLimit` to change both limits, and `disableCaches`/`enableCaches` to control caching. Disabling caches also clears existing entries. Literal `match` patterns are compiled eagerly into their parsed evaluator; model-supplied patterns are compiled when evaluated.
+
+## Errors
+
+Parse-time failures (malformed syntax, unknown operators, non-finite literals, and invalid constant regex patterns) throw `ExpressionParseException`, which extends `FormatException`. Failures while evaluating a parsed expression (invalid numeric values, division by zero, invalid references, cyclic lists, and invalid model-supplied regex patterns) throw `ExpressionEvaluationException`, which extends `StateError`. Passing a value that is neither a string nor a Boolean throws an `ArgumentError`.
 
 ## Security
 
 Expressions and regex patterns are trusted input. Regex evaluation can be vulnerable to catastrophic backtracking. Do not use untrusted expressions or patterns as an authorization boundary.
 
 ## Development
+
+The repository includes a Docker Compose environment using the current
+`dart:stable` image. From this directory, run the complete development check
+with:
+
+```bash
+docker compose run --rm verify
+```
+
+The source mount is configured through the untracked `.env` file because the
+Docker daemon runs in Linux. Create it from `.env.example` and set
+`DART_PROJECT_PATH` to the Linux path for this checkout:
+
+```bash
+cp .env.example .env
+```
+
+For this checkout, the value is:
+
+```dotenv
+DART_PROJECT_PATH=/mnt/c/Git/SimplEx/simple_expressions_dart
+```
+
+To use a different checkout location, update `.env` or override the variable
+before running Compose. For example, in PowerShell:
+
+```powershell
+$env:DART_PROJECT_PATH = '/mnt/c/path/to/simple_expressions_dart'
+docker compose run --rm verify
+```
+
+Individual commands are also available through the `dart` service:
+
+```bash
+docker compose run --rm dart pub get
+docker compose run --rm dart format .
+docker compose run --rm dart analyze
+docker compose run --rm dart test
+```
+
+To open a shell in the Dart container:
+
+```bash
+docker compose run --rm shell
+```
+
+To check the package's pub.dev score locally with Pana:
+
+```bash
+docker compose run --rm pana
+```
+
+Pana is activated in the shared pub cache, so subsequent runs reuse the
+downloaded package.
+
+When Dart is installed locally, the same commands can be run directly:
 
 ```bash
 dart pub get

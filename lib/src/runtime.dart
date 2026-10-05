@@ -1,65 +1,89 @@
 part of 'simple_expressions_impl.dart';
 
-double _truncate(double value) => value.truncateToDouble();
+final RegExp _decimalPattern = RegExp(
+  r'^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$',
+);
 
-double _floor(double value) => value.floorToDouble();
+bool _isPortableWhitespace(int code) =>
+    code >= 0x0009 && code <= 0x000d ||
+    code == 0x0020 ||
+    code == 0x0085 ||
+    code == 0x00a0 ||
+    code == 0x1680 ||
+    code >= 0x2000 && code <= 0x200a ||
+    code == 0x2028 ||
+    code == 0x2029 ||
+    code == 0x202f ||
+    code == 0x205f ||
+    code == 0x3000;
 
-double _ceil(double value) => value.ceilToDouble();
-
-double _mathNumber(_Value value, {bool strict = false}) {
-  if (value.kind == _ValueKind.string &&
-      (value.value as String).trim().isEmpty) {
-    if (strict) throw StateError('Invalid numeric value');
-    return 0;
+String _trimPortableWhitespace(String value) {
+  var start = 0;
+  var end = value.length;
+  while (start < end && _isPortableWhitespace(value.codeUnitAt(start))) {
+    start++;
   }
-  return _toNumber(value, strict: strict);
+  while (end > start && _isPortableWhitespace(value.codeUnitAt(end - 1))) {
+    end--;
+  }
+  return start == 0 && end == value.length
+      ? value
+      : value.substring(start, end);
 }
 
-double _num(_Value value) {
-  return _mathNumber(value, strict: true);
+_Value _numericResult(num value) {
+  final result = value.toDouble();
+  if (!result.isFinite) {
+    throw ExpressionEvaluationException('Invalid numeric result');
+  }
+  return _Value.number(result);
 }
 
-double _javascriptRemainder(double dividend, double divisor) {
-  if (divisor == 0) throw StateError('Division by zero');
-  if (dividend.isNaN || divisor.isNaN || dividend.isInfinite) {
-    return double.nan;
-  }
-  if (divisor.isInfinite || dividend == 0) return dividend;
+double _signedRemainder(double dividend, double divisor) {
+  if (divisor == 0) throw ExpressionEvaluationException('Division by zero');
+  if (dividend == 0) return dividend;
   return dividend.remainder(divisor);
 }
 
-double _javascriptMin(double left, double right) {
-  if (left.isNaN || right.isNaN) return double.nan;
-  if (left == 0 && right == 0) {
-    return left.isNegative || right.isNegative ? -0.0 : 0.0;
-  }
-  return left < right ? left : right;
-}
-
-double _javascriptMax(double left, double right) {
-  if (left.isNaN || right.isNaN) return double.nan;
-  if (left == 0 && right == 0) {
-    return left.isNegative && right.isNegative ? -0.0 : 0.0;
-  }
-  return left > right ? left : right;
-}
-
 _Value _round(_Value value, _Value decimals) {
-  final places = _mathNumber(decimals, strict: true);
-  if (places.isNaN ||
-      places.isInfinite ||
-      places != places.truncateToDouble() ||
-      places < 0 ||
-      places > 9007199254740991) {
-    throw StateError('Round precision must be a non-negative safe integer');
+  final placesValue = _toNumber(decimals);
+  if (placesValue != placesValue.truncateToDouble() || placesValue < 0) {
+    throw ExpressionEvaluationException(
+        'Round precision must be a non-negative safe integer');
   }
-  final factor = math.pow(10, places).toDouble();
-  if (factor.isInfinite) {
-    throw StateError('Round precision is too large');
+  if (placesValue > 308) {
+    throw ExpressionEvaluationException('Round precision is too large');
   }
-  final number = _mathNumber(value, strict: true);
-  final result = (number * factor + 0.5).floorToDouble() / factor;
-  return _Value.number(result == 0 && number.isNegative ? -0.0 : result);
+  final number = _toNumber(value);
+  final places = placesValue.toInt();
+  if (number == 0) return _zeroValue;
+
+  final data = ByteData(8)..setFloat64(0, number.abs());
+  final bits = data.getUint64(0);
+  final exponentBits = (bits >> 52) & 0x7ff;
+  final fraction = bits & 0x000fffffffffffff;
+  final significand = exponentBits == 0
+      ? BigInt.from(fraction)
+      : BigInt.from(0x0010000000000000 | fraction);
+  final binaryExponent = exponentBits == 0 ? -1074 : exponentBits - 1023 - 52;
+  final numerator = significand * BigInt.from(5).pow(places);
+  final shift = binaryExponent + places;
+  BigInt rounded;
+  if (shift >= 0) {
+    rounded = numerator << shift;
+  } else {
+    final divisor = BigInt.one << -shift;
+    final quotient = numerator ~/ divisor;
+    final remainder = numerator.remainder(divisor);
+    rounded = remainder * BigInt.from(2) >= divisor
+        ? quotient + BigInt.one
+        : quotient;
+  }
+  if (number.isNegative) rounded = -rounded;
+
+  final result =
+      places == 0 ? rounded.toDouble() : double.parse('${rounded}e-$places');
+  return _numericResult(result);
 }
 
 class _Compiled {
@@ -87,7 +111,10 @@ class _Value {
   const _Value.missing() : this(_ValueKind.missing, null);
   const _Value.nullValue() : this(_ValueKind.nullValue, null);
   const _Value.boolean(bool value) : this(_ValueKind.boolean, value);
-  _Value.number(num value) : this(_ValueKind.number, value.toDouble());
+  // Scalar numbers are normalized; raw numbers nested in live lists/maps are
+  // returned without walking or copying those containers.
+  _Value.number(num value)
+      : this(_ValueKind.number, value == 0 ? 0.0 : value.toDouble());
   const _Value.string(String value) : this(_ValueKind.string, value);
 
   /// Arrays hold either the model's raw list (items converted lazily on
@@ -185,14 +212,11 @@ bool _isEmpty(_Value value) =>
     value.isNullish ||
     value.kind == _ValueKind.string && (value.value as String).isEmpty;
 
-String _regexInput(_Value value) =>
-    value.isTruthy ? _toJavaScriptString(value) : '';
-
-String _falsyString(_Value value) => _regexInput(value);
+String _falsyText(_Value value) => value.isTruthy ? _textValue(value) : '';
 
 _Value _trim(_Value value) {
   if (value.isNullish) return value;
-  return _Value.string(_falsyString(value).trim());
+  return _Value.string(_trimPortableWhitespace(_falsyText(value)));
 }
 
 _Value _length(_Value value) {
@@ -207,20 +231,20 @@ _Value _length(_Value value) {
     final object = value.value as Map;
     if (object.containsKey('length')) return _fromPublic(object['length']);
   }
-  throw StateError('Input does not have a length');
+  throw ExpressionEvaluationException('Input does not have a length');
 }
 
 bool _contains(_Value left, _Value right) =>
     left.kind == _ValueKind.string &&
-    (left.value as String).contains(_toJavaScriptString(right));
+    (left.value as String).contains(_textValue(right));
 
 bool _startsWith(_Value left, _Value right) =>
     left.kind == _ValueKind.string &&
-    (left.value as String).startsWith(_toJavaScriptString(right));
+    (left.value as String).startsWith(_textValue(right));
 
 bool _endsWith(_Value left, _Value right) =>
     left.kind == _ValueKind.string &&
-    (left.value as String).endsWith(_toJavaScriptString(right));
+    (left.value as String).endsWith(_textValue(right));
 
 bool _inList(_Value value, _Value list) {
   if (list.kind != _ValueKind.array) return false;
@@ -232,54 +256,42 @@ bool _inList(_Value value, _Value list) {
 }
 
 void _writeConcatValue(StringBuffer buffer, _Value value) {
-  if (value.isTruthy) buffer.write(_toJavaScriptString(value));
+  if (value.isTruthy) buffer.write(_textValue(value));
 }
 
-double _toNumber(_Value value, {bool strict = false}) {
-  if (strict) {
-    if (value.kind == _ValueKind.number) {
-      final number = value.value as double;
-      if (number.isFinite) return number;
-    } else if (value.kind == _ValueKind.string) {
-      final text = (value.value as String).trim();
-      final number = _parseJavaScriptNumber(text);
-      if (text.isNotEmpty && number != null && number.isFinite) return number;
-    }
-    throw StateError('Invalid numeric value');
+double _toNumber(_Value value) {
+  if (value.kind == _ValueKind.number) {
+    final number = value.value as double;
+    if (number.isFinite) return number;
+  } else if (value.kind == _ValueKind.string) {
+    final number = _parseDecimalNumber(value.value as String);
+    if (number != null) return number;
   }
-
-  switch (value.kind) {
-    case _ValueKind.nullValue:
-      return 0;
-    case _ValueKind.boolean:
-      return value.value as bool ? 1 : 0;
-    case _ValueKind.number:
-      return value.value as double;
-    case _ValueKind.string:
-      final text = (value.value as String).trim();
-      final number = _parseJavaScriptNumber(text);
-      return number ?? double.nan;
-    default:
-      return double.nan;
-  }
+  throw ExpressionEvaluationException('Invalid numeric value');
 }
 
-double? _parseJavaScriptNumber(String text) {
-  if (text.length > 2 && text.startsWith('0')) {
-    final radix = switch (text[1]) {
-      'x' || 'X' => 16,
-      'b' || 'B' => 2,
-      'o' || 'O' => 8,
-      _ => null,
-    };
-    if (radix != null) {
-      return BigInt.tryParse(text.substring(2), radix: radix)?.toDouble();
-    }
-  }
-  return double.tryParse(text);
+double? _parseDecimalNumber(String value) {
+  final text = _trimPortableWhitespace(value);
+  if (!_decimalPattern.hasMatch(text)) return null;
+  final parsed = _parseDecimalLiteral(text);
+  return parsed.isFinite ? parsed : null;
 }
 
-String _toJavaScriptString(_Value value) {
+double _parseDecimalLiteral(String text) {
+  final parsed = double.tryParse(text);
+  if (parsed != null) return parsed;
+  // Some Dart versions do not accept the literal grammar's trailing dot.
+  final dot = text.indexOf('.');
+  if (dot > 0 &&
+      (dot + 1 == text.length ||
+          text[dot + 1] == 'e' ||
+          text[dot + 1] == 'E')) {
+    return double.parse(text.substring(0, dot) + text.substring(dot + 1));
+  }
+  return double.parse(text);
+}
+
+String _textValue(_Value value, [Set<List>? activeLists]) {
   switch (value.kind) {
     case _ValueKind.missing:
       return 'undefined';
@@ -293,13 +305,23 @@ String _toJavaScriptString(_Value value) {
       return value.value as String;
     case _ValueKind.array:
       final items = value.value as List;
-      final buffer = StringBuffer();
-      for (var index = 0; index < items.length; index++) {
-        if (index > 0) buffer.write(',');
-        final item = _arrayItem(items[index]);
-        if (!item.isNullish) buffer.write(_toJavaScriptString(item));
+      activeLists ??= HashSet<List>.identity();
+      if (!activeLists.add(items)) {
+        throw ExpressionEvaluationException('Cyclic list value');
       }
-      return buffer.toString();
+      try {
+        final buffer = StringBuffer();
+        for (var index = 0; index < items.length; index++) {
+          if (index > 0) buffer.write(',');
+          final item = _arrayItem(items[index]);
+          if (!item.isNullish) {
+            buffer.write(_textValue(item, activeLists));
+          }
+        }
+        return buffer.toString();
+      } finally {
+        activeLists.remove(items);
+      }
     case _ValueKind.object:
       return '[object Object]';
   }

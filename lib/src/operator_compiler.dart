@@ -76,10 +76,10 @@ extension _OperatorCompiler on _ExpressionParser {
         return _Compiled((model) => _length(inner(model)));
       case 'lower':
         return _Compiled(
-            (model) => _Value.string(_falsyString(inner(model)).toLowerCase()));
+            (model) => _Value.string(_falsyText(inner(model)).toLowerCase()));
       case 'upper':
         return _Compiled(
-            (model) => _Value.string(_falsyString(inner(model)).toUpperCase()));
+            (model) => _Value.string(_falsyText(inner(model)).toUpperCase()));
       case 'trim':
         return _Compiled((model) => _trim(inner(model)));
       case 'defined':
@@ -87,21 +87,21 @@ extension _OperatorCompiler on _ExpressionParser {
             (model) => inner(model).isNullish ? _falseValue : _trueValue);
       case 'int':
         return _Compiled((model) =>
-            _Value.number(_truncate(_mathNumber(inner(model), strict: true))));
+            _numericResult(_toNumber(inner(model)).truncateToDouble()));
       case 'num':
-        return _Compiled((model) => _Value.number(_num(inner(model))));
+        return _Compiled((model) => _numericResult(_toNumber(inner(model))));
       case 'abs':
-        return _Compiled((model) =>
-            _Value.number(_mathNumber(inner(model), strict: true).abs()));
+        return _Compiled(
+            (model) => _numericResult(_toNumber(inner(model)).abs()));
       case 'floor':
-        return _Compiled((model) =>
-            _Value.number(_floor(_mathNumber(inner(model), strict: true))));
+        return _Compiled(
+            (model) => _numericResult(_toNumber(inner(model)).floorToDouble()));
       case 'ceil':
-        return _Compiled((model) =>
-            _Value.number(_ceil(_mathNumber(inner(model), strict: true))));
+        return _Compiled(
+            (model) => _numericResult(_toNumber(inner(model)).ceilToDouble()));
       case 'sqrt':
-        return _Compiled((model) =>
-            _Value.number(math.sqrt(_mathNumber(inner(model), strict: true))));
+        return _Compiled(
+            (model) => _numericResult(math.sqrt(_toNumber(inner(model)))));
       default:
         _fail('invalid operator: $operator');
     }
@@ -125,19 +125,29 @@ extension _OperatorCompiler on _ExpressionParser {
         return _Compiled((model) =>
             _inList(left(model), right(model)) ? _trueValue : _falseValue);
       case 'gt':
-        return _Compiled((model) =>
-            _compare(left(model), right(model)) > 0 ? _trueValue : _falseValue);
+        return _Compiled((model) {
+          final comparison = _compare(left(model), right(model));
+          return comparison != null && comparison > 0
+              ? _trueValue
+              : _falseValue;
+        });
       case 'lt':
-        return _Compiled((model) =>
-            _compare(left(model), right(model)) < 0 ? _trueValue : _falseValue);
+        return _Compiled((model) {
+          final comparison = _compare(left(model), right(model));
+          return comparison != null && comparison < 0
+              ? _trueValue
+              : _falseValue;
+        });
       case 'match':
         return _compileMatch(left, right);
       case 'round':
         return _Compiled((model) => _round(left(model), right(model)));
       case 'pow':
-        return _Compiled((model) => _Value.number(math.pow(
-            _mathNumber(left(model), strict: true),
-            _mathNumber(right(model), strict: true))));
+        return _Compiled((model) {
+          final base = left(model);
+          final exponent = right(model);
+          return _numericResult(math.pow(_toNumber(base), _toNumber(exponent)));
+        });
       default:
         _fail('invalid operator: $operator');
     }
@@ -148,20 +158,31 @@ extension _OperatorCompiler on _ExpressionParser {
     if (constant != null &&
         constant.kind == _ValueKind.string &&
         constant.isTruthy) {
-      final regex = RegExp(constant.value as String);
+      final RegExp regex;
+      try {
+        regex = RegExp(constant.value as String);
+      } on FormatException catch (error) {
+        throw ExpressionParseException.withoutPosition(
+            'invalid regular expression: ${error.message}');
+      }
       return _Compiled((model) =>
-          regex.hasMatch(_regexInput(value(model))) ? _trueValue : _falseValue);
+          regex.hasMatch(_falsyText(value(model))) ? _trueValue : _falseValue);
     }
     return _Compiled((model) {
+      final input = value(model);
       final runtimePattern = pattern(model);
       if (runtimePattern.kind != _ValueKind.string ||
           !runtimePattern.isTruthy) {
         return _falseValue;
       }
-      final regex = RegExp(runtimePattern.value as String);
-      return regex.hasMatch(_regexInput(value(model)))
-          ? _trueValue
-          : _falseValue;
+      final RegExp regex;
+      try {
+        regex = RegExp(runtimePattern.value as String);
+      } on FormatException catch (error) {
+        throw ExpressionEvaluationException(
+            'Invalid regular expression: ${error.message}');
+      }
+      return regex.hasMatch(_falsyText(input)) ? _trueValue : _falseValue;
     });
   }
 
@@ -232,10 +253,14 @@ extension _OperatorCompiler on _ExpressionParser {
         return _Compiled((model) =>
             condition(model).isTruthy ? whenTrue(model) : whenFalse(model));
       case 'clamp':
-        return _Compiled((model) => _Value.number(math.min(
-            math.max(_mathNumber(condition(model), strict: true),
-                _mathNumber(whenTrue(model), strict: true)),
-            _mathNumber(whenFalse(model), strict: true))));
+        return _Compiled((model) {
+          final value = condition(model);
+          final minimum = whenTrue(model);
+          final maximum = whenFalse(model);
+          return _numericResult(math.min(
+              math.max(_toNumber(value), _toNumber(minimum)),
+              _toNumber(maximum)));
+        });
       default:
         _fail('invalid operator: $operator');
     }
@@ -244,32 +269,42 @@ extension _OperatorCompiler on _ExpressionParser {
   static _Compiled _compileNumericVariadic(
       List<_Compiled> arguments, _NumericOperation operation, String name) {
     return _Compiled((model) {
-      final numbers = <double>[];
-      final activeLists = HashSet<List>.identity();
+      final evaluated = <_Value>[];
       for (final argument in arguments) {
-        final value = argument(model);
-        if (arguments.length == 1 && value.kind != _ValueKind.array) {
-          throw StateError(
-              'operator $name expects at least two arguments or one list argument');
-        }
-        _flattenNumeric(value, numbers, activeLists);
+        evaluated.add(argument(model));
       }
+      if (arguments.length == 1 && evaluated.single.kind != _ValueKind.array) {
+        throw ExpressionEvaluationException(
+            'Invalid Expression: operator $name expects at least two arguments '
+            'or one list argument');
+      }
+
+      final leaves = <_Value>[];
+      final activeLists = HashSet<List>.identity();
+      for (final value in evaluated) {
+        _flattenNumeric(value, leaves, activeLists);
+      }
+
+      final numbers = [for (final leaf in leaves) _toNumber(leaf)];
 
       switch (operation) {
         case _NumericOperation.subtract:
         case _NumericOperation.divide:
         case _NumericOperation.modulo:
-          if (numbers.length < 2) {
+          if (leaves.length < 2) {
             final operatorName = '${name[0].toUpperCase()}${name.substring(1)}';
-            throw StateError('$operatorName requires at least two values');
+            throw ExpressionEvaluationException(
+                '$operatorName requires at least two values');
           }
         case _NumericOperation.minimum:
-          if (numbers.isEmpty) {
-            throw StateError('Min requires at least one value');
+          if (leaves.isEmpty) {
+            throw ExpressionEvaluationException(
+                'Min requires at least one value');
           }
         case _NumericOperation.maximum:
-          if (numbers.isEmpty) {
-            throw StateError('Max requires at least one value');
+          if (leaves.isEmpty) {
+            throw ExpressionEvaluationException(
+                'Max requires at least one value');
           }
         case _NumericOperation.add:
         case _NumericOperation.multiply:
@@ -277,40 +312,44 @@ extension _OperatorCompiler on _ExpressionParser {
 
       switch (operation) {
         case _NumericOperation.add:
-          return _Value.number(numbers.fold(0, (sum, value) => sum + value));
+          return _numericResult(numbers.fold(0.0, (sum, value) => sum + value));
         case _NumericOperation.multiply:
-          return _Value.number(
-              numbers.fold(1, (product, value) => product * value));
+          return _numericResult(
+              numbers.fold(1.0, (product, value) => product * value));
         case _NumericOperation.subtract:
-          return _Value.number(
+          return _numericResult(
               _foldNumeric(numbers, (result, value) => result - value));
         case _NumericOperation.divide:
-          return _Value.number(_foldNumeric(numbers, (result, value) {
-            if (value == 0) throw StateError('Division by zero');
+          return _numericResult(_foldNumeric(numbers, (result, value) {
+            if (value == 0) {
+              throw ExpressionEvaluationException('Division by zero');
+            }
             return result / value;
           }));
         case _NumericOperation.modulo:
-          return _Value.number(_foldNumeric(numbers, _javascriptRemainder));
+          return _numericResult(_foldNumeric(numbers, _signedRemainder));
         case _NumericOperation.minimum:
-          return _Value.number(numbers.reduce(_javascriptMin));
+          return _numericResult(numbers.reduce(math.min));
         case _NumericOperation.maximum:
-          return _Value.number(numbers.reduce(_javascriptMax));
+          return _numericResult(numbers.reduce(math.max));
       }
     });
   }
 
   static void _flattenNumeric(
-      _Value value, List<double> numbers, Set<List> activeLists) {
+      _Value value, List<_Value> leaves, Set<List> activeLists) {
     if (value.kind != _ValueKind.array) {
-      numbers.add(_mathNumber(value, strict: true));
+      leaves.add(value);
       return;
     }
 
     final items = value.value as List;
-    if (!activeLists.add(items)) throw StateError('Invalid numeric value');
+    if (!activeLists.add(items)) {
+      throw ExpressionEvaluationException('Invalid numeric value');
+    }
     try {
       for (final item in items) {
-        _flattenNumeric(_arrayItem(item), numbers, activeLists);
+        _flattenNumeric(_arrayItem(item), leaves, activeLists);
       }
     } finally {
       activeLists.remove(items);

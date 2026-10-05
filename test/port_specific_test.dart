@@ -49,6 +49,77 @@ void main() {
         isTrue);
   });
 
+  test('preserves visited-pair handling for cyclic list equality', () {
+    final left = <Object?>[1];
+    final right = <Object?>[1];
+    left.add(left);
+    right.add(right);
+    expect(
+        executeExpression({'left': left, 'right': right}, 'eq(#left, #right)'),
+        isTrue);
+
+    final different = <Object?>[2];
+    different.add(different);
+    expect(
+        executeExpression(
+            {'left': left, 'right': different}, 'eq(#left, #right)'),
+        isFalse);
+  });
+
+  test('equality uses explicit portable scalar and collection rules', () {
+    for (final expression in [
+      'eq(1, "1")',
+      'eq(true, 1)',
+      'eq(false, 0)',
+      'eq(true, "1")',
+      'eq(false, "0")',
+      'eq(#missing, #value)',
+      'eq([1, "2"], ["1", 2])',
+    ]) {
+      expect(executeExpression({'value': null}, expression), isTrue,
+          reason: expression);
+    }
+    for (final expression in [
+      'eq(true, "true")',
+      'eq(false, "")',
+      'eq(false, "   ")',
+      'eq(0, "0x0")',
+      'eq([], "")',
+      'eq([1], 1)',
+      'eq([1], #map)',
+      'eq(#map, "[object Object]")',
+    ]) {
+      expect(
+          executeExpression({'map': <String, Object?>{}}, expression), isFalse,
+          reason: expression);
+    }
+  });
+
+  test('comparisons are ordinal for strings and numeric for numeric pairs', () {
+    for (final expression in [
+      'lt("10", "2")',
+      'gt("2", 1)',
+      'lt(.5, "1e0")',
+    ]) {
+      expect(executeExpression({}, expression), isTrue, reason: expression);
+    }
+    for (final expression in [
+      'lt("2", "10")',
+      'gt(true, 0)',
+      'lt(#missing, 1)',
+      'lt(#value, 1)',
+      'gt("", "a")',
+      'lt("   ", "a")',
+      'gt([], 0)',
+      'lt(#map, "z")',
+      'gt("invalid", 0)',
+      'lt("0x10", 17)',
+    ]) {
+      expect(executeExpression({'value': null, 'map': {}}, expression), isFalse,
+          reason: expression);
+    }
+  });
+
   test('does not convert empty or blank strings to zero', () {
     expect(executeExpression({'value': ''}, 'eq(#value, 0)'), isFalse);
     expect(executeExpression({'value': '   '}, 'eq(#value, 0)'), isFalse);
@@ -108,18 +179,41 @@ void main() {
     expect(parseExpression('sqrt(9)').evaluateValue({}), 3.0);
   });
 
-  test('numeric strings use JavaScript radix grammar', () {
+  test('numeric strings use the finite decimal literal grammar', () {
     for (final entry in {
-      '0x10': 16.0,
-      '0X10000000000000000': 18446744073709551616.0,
-      '0b10': 2.0,
-      '0o10': 8.0,
+      '.5': 0.5,
+      '5.': 5.0,
+      '5.e3': 5000.0,
+      '+2.5e-1': 0.25,
+      '-.5E+1': -5.0,
     }.entries) {
       final model = {'value': entry.key};
       expect(parseExpression('num(#value)').evaluateValue(model), entry.value);
       expect(parseExpression('add(#value, 1)').evaluateValue(model),
           entry.value + 1);
       expect(executeExpression(model, 'eq(#value, ${entry.value})'), isTrue);
+    }
+
+    expect(parseExpression('num(.5)').evaluateValue({}), 0.5);
+    expect(parseExpression('num(5.)').evaluateValue({}), 5.0);
+
+    for (final value in [
+      '0x10',
+      '0Xff',
+      '0b10',
+      '0o10',
+      '.',
+      '+',
+      '1_000',
+      '1e',
+    ]) {
+      expect(
+        () => parseExpression('num(#value)').evaluateValue({'value': value}),
+        throwsA(
+            predicate((error) => '$error'.contains('Invalid numeric value'))),
+        reason: 'accepted $value',
+      );
+      expect(executeExpression({'value': value}, 'eq(#value, 16)'), isFalse);
     }
   });
 
@@ -149,9 +243,53 @@ void main() {
     }
     expect(() => parseExpression('num(#missing)').evaluateValue({}),
         throwsStateError);
-    expect(() => parseExpression('num(1e999)').evaluateValue({}),
-        throwsStateError);
+    expect(() => parseExpression('1e999'),
+        throwsA(isA<ExpressionParseException>()));
     expect(parseExpression('num(" 2.5 ")').evaluateValue({}), 2.5);
+  });
+
+  test('uses the explicit Unicode White_Space set', () {
+    final whitespace = <int>[
+      ...List.generate(5, (index) => 0x0009 + index),
+      0x0020,
+      0x0085,
+      0x00a0,
+      0x1680,
+      ...List.generate(11, (index) => 0x2000 + index),
+      0x2028,
+      0x2029,
+      0x202f,
+      0x205f,
+      0x3000,
+    ];
+    for (final code in whitespace) {
+      final space = String.fromCharCode(code);
+      expect(parseExpression('$space true$space').evaluateValue({}), isTrue,
+          reason: 'expression U+${code.toRadixString(16)}');
+      expect(parseExpression('add(1$space,${space}2)').evaluateValue({}), 3.0,
+          reason: 'token U+${code.toRadixString(16)}');
+      expect(
+          parseExpression('trim(#value)')
+              .evaluateValue({'value': '${space}x$space'}),
+          'x',
+          reason: 'trim U+${code.toRadixString(16)}');
+      expect(
+          parseExpression('num(#value)')
+              .evaluateValue({'value': '${space}2$space'}),
+          2.0,
+          reason: 'numeric U+${code.toRadixString(16)}');
+    }
+
+    const bom = '\ufeff';
+    expect(() => parseExpression('${bom}true$bom'), throwsFormatException);
+    expect(
+        parseExpression('trim(#value)').evaluateValue({'value': '${bom}x$bom'}),
+        '${bom}x$bom');
+    expect(
+      () => parseExpression('num(#value)')
+          .evaluateValue({'value': '${bom}2$bom'}),
+      throwsA(predicate((error) => '$error'.contains('Invalid numeric value'))),
+    );
   });
 
   test('recursively flattens numeric lists depth first', () {
@@ -214,6 +352,35 @@ void main() {
         6.0);
   });
 
+  test('text conversion rejects active list cycles but permits reuse', () {
+    final cyclic = <Object?>[];
+    cyclic.add(cyclic);
+    for (final expression in [
+      'concat(#value, "")',
+      'contains("x", #value)',
+      'startswith("x", #value)',
+      'endswith("x", #value)',
+      'match(#value, "x")',
+      'trim(#value)',
+      'lower(#value)',
+      'upper(#value)',
+    ]) {
+      expect(
+        () => parseExpression(expression).evaluateValue({'value': cyclic}),
+        throwsA(predicate((error) => '$error'.contains('Cyclic list value'))),
+        reason: expression,
+      );
+    }
+
+    final shared = <Object?>[1, 2];
+    expect(
+      parseExpression('concat(#value, "")').evaluateValue({
+        'value': [shared, shared]
+      }),
+      '1,2,1,2',
+    );
+  });
+
   test('enforces numeric leaf counts after flattening', () {
     expect(parseExpression('min([[1]])').evaluateValue({}), 1.0);
     expect(parseExpression('max([[1]])').evaluateValue({}), 1.0);
@@ -231,59 +398,110 @@ void main() {
 
   test('one scalar argument reports the portable list alternative', () {
     for (final operator in ['add', 'sub', 'mul', 'div', 'mod', 'min', 'max']) {
+      final expression = parseExpression('$operator(1)');
       expect(
-        () => parseExpression('$operator(1)').evaluateValue({}),
-        throwsA(predicate((error) => '$error'.contains(
-            'operator $operator expects at least two arguments or one list argument'))),
+        () => expression.evaluateValue({}),
+        throwsA(predicate((error) => '$error'
+            .contains('operator $operator expects at least two arguments '
+                'or one list argument'))),
       );
     }
   });
 
+  test('evaluates and flattens all variadic arguments before conversion', () {
+    expect(
+      () => parseExpression('add("bad", sqrt(-1))').evaluateValue({}),
+      throwsA(
+          predicate((error) => '$error'.contains('Invalid numeric result'))),
+    );
+    expect(
+      () => parseExpression('sub("bad", [])').evaluateValue({}),
+      throwsA(predicate((error) => '$error'.contains('Invalid numeric value'))),
+    );
+  });
+
   test('supports round, power, and clamp', () {
     expect(parseExpression('round(12.345, 2)').evaluateValue({}), 12.35);
+    expect(parseExpression('round(-12.345, 2)').evaluateValue({}), -12.35);
+    expect(parseExpression('round(1.005, 2)').evaluateValue({}), 1.0);
+    expect(parseExpression('round(-1.005, 2)').evaluateValue({}), -1.0);
+    expect(
+        parseExpression('round(1.0049999999999997, 2)').evaluateValue({}), 1.0);
+    expect(parseExpression('round(1.0050000000000001, 2)').evaluateValue({}),
+        1.01);
+    expect(
+        parseExpression('round(7.164692098702749e-215, 230)').evaluateValue({}),
+        7.164692098702749e-215);
+    expect(
+        parseExpression('round(4.898568327955125e-190, 204)').evaluateValue({}),
+        4.89856832795512e-190);
+    expect(
+        parseExpression('round(6.663776354903525e-38, 52)').evaluateValue({}),
+        6.66377635490352e-38);
+    expect(parseExpression('round(1e308, 308)').evaluateValue({}), 1e308);
+    expect(parseExpression('round(5e-324, 308)').evaluateValue({}), 0.0);
+    expect(parseExpression('round(1.25, "308")').evaluateValue({}), 1.25);
     expect(parseExpression('pow(2, 3)').evaluateValue({}), 8.0);
     expect(parseExpression('clamp(12, 0, 10)').evaluateValue({}), 10.0);
   });
 
-  test('round preserves JavaScript negative zero', () {
-    final result =
-        parseExpression('round(-0.5, 0)').evaluateValue({}) as double;
-    expect(result, 0.0);
-    expect(result.isNegative, isTrue);
+  test('numeric results normalize negative zero', () {
+    for (final expression in ['round(-0.4, 0)', 'mul(-1, 0)', 'ceil(-0.5)']) {
+      final result = parseExpression(expression).evaluateValue({}) as double;
+      expect(result, 0.0, reason: expression);
+      expect(result.isNegative, isFalse, reason: expression);
+    }
+
+    final nested = <Object?>[-0.0];
+    final returned =
+        parseExpression('#value').evaluateValue({'value': nested}) as List;
+    expect(identical(returned, nested), isTrue);
+    expect((returned.single as double).isNegative, isTrue);
+
+    final nestedMap = <String, Object?>{'number': -0.0};
+    final returnedMap =
+        parseExpression('#value').evaluateValue({'value': nestedMap}) as Map;
+    expect(identical(returnedMap, nestedMap), isTrue);
+    expect((returnedMap['number'] as double).isNegative, isTrue);
   });
 
-  test('matches JavaScript remainder edge cases', () {
+  test('rounds decimal ties away from zero', () {
+    expect(parseExpression('round(0.5, 0)').evaluateValue({}), 1.0);
+    expect(parseExpression('round(-0.5, 0)').evaluateValue({}), -1.0);
+    expect(parseExpression('round(2.5, 0)').evaluateValue({}), 3.0);
+    expect(parseExpression('round(-2.5, 0)').evaluateValue({}), -3.0);
+  });
+
+  test('uses signed remainder and rejects invalid results', () {
     expect(parseExpression('mod(-7, 3)').evaluateValue({}), -1.0);
     expect(parseExpression('mod(7, -3)').evaluateValue({}), 1.0);
     expect(
         parseExpression('mod(#value, 3)').evaluateValue({'value': 1e308}), 2.0);
     expect(
       () => parseExpression('mod(7, pow(1e308, 2))').evaluateValue({}),
-      throwsA(predicate((error) => '$error'.contains('Invalid numeric value'))),
+      throwsA(
+          predicate((error) => '$error'.contains('Invalid numeric result'))),
     );
     expect(
       () => parseExpression('mod(pow(1e308, 2), 3)').evaluateValue({}),
-      throwsA(predicate((error) => '$error'.contains('Invalid numeric value'))),
+      throwsA(
+          predicate((error) => '$error'.contains('Invalid numeric result'))),
     );
   });
 
-  test('allows nonfinite results only at the top numeric level', () {
-    expect((parseExpression('sqrt(-1)').evaluateValue({}) as double).isNaN,
-        isTrue);
-    expect(
-        (parseExpression('pow(1e308, 2)').evaluateValue({}) as double)
-            .isInfinite,
-        isTrue);
+  test('every numeric operator rejects a nonfinite result', () {
     for (final expression in [
-      'abs(sqrt(-1))',
-      'add(pow(1e308, 2), 1)',
-      'pow(2, sqrt(-1))',
-      'clamp(pow(1e308, 2), 0, 1)',
+      'sqrt(-1)',
+      'pow(1e308, 2)',
+      'add(1e308, 1e308)',
+      'sub(-1e308, 1e308)',
+      'mul(1e308, 2)',
+      'div(1e308, 1e-308)',
     ]) {
       expect(
         () => parseExpression(expression).evaluateValue({}),
         throwsA(
-            predicate((error) => '$error'.contains('Invalid numeric value'))),
+            predicate((error) => '$error'.contains('Invalid numeric result'))),
         reason: expression,
       );
     }
@@ -291,31 +509,32 @@ void main() {
 
   test('literal regexes compile eagerly and runtime regexes compile on use',
       () {
-    expect(() => parseExpression('match("x", "[")'), throwsFormatException);
+    expect(() => parseExpression('match("x", "[")'),
+        throwsA(isA<ExpressionParseException>()));
     final expression = parseExpression('match("x", #pattern)');
     expect(() => expression.evaluateValue({'pattern': '['}),
-        throwsFormatException);
+        throwsA(isA<ExpressionEvaluationException>()));
 
     expect(expression.evaluateValue({'pattern': 'x'}), isTrue);
     expect(expression.evaluateValue({'pattern': 'y'}), isFalse);
     expect(expression.evaluateValue({'pattern': 'x'}), isTrue);
   });
 
-  test('min and max reject nonfinite inputs and preserve signed zero', () {
+  test('min and max reject nonfinite inputs and normalize signed zero', () {
     expect(
         () => parseExpression('min(sqrt(-1), 1)').evaluateValue({}),
         throwsA(
-            predicate((error) => '$error'.contains('Invalid numeric value'))));
+            predicate((error) => '$error'.contains('Invalid numeric result'))));
     expect(
         () => parseExpression('max(1, sqrt(-1))').evaluateValue({}),
         throwsA(
-            predicate((error) => '$error'.contains('Invalid numeric value'))));
+            predicate((error) => '$error'.contains('Invalid numeric result'))));
 
     final minimum = parseExpression('min(#positive, #negative)')
         .evaluateValue({'positive': 0.0, 'negative': -0.0}) as double;
     final maximum = parseExpression('max(#negative, #positive)')
         .evaluateValue({'positive': 0.0, 'negative': -0.0}) as double;
-    expect(minimum.isNegative, isTrue);
+    expect(minimum.isNegative, isFalse);
     expect(maximum.isNegative, isFalse);
   });
 
@@ -327,6 +546,24 @@ void main() {
     expect(() => SimpleExpressions.get(1), throwsArgumentError);
   });
 
+  test('Boolean expressions share cache keys with lowercase strings', () {
+    SimpleExpressions.enableCaches();
+    SimpleExpressions.clear();
+
+    final trueBoolean = SimpleExpressions.get(true);
+    expect(trueBoolean, same(SimpleExpressions.get('true')));
+    expect(trueBoolean.evaluateValue({}), isTrue);
+
+    SimpleExpressions.clear(expression: true);
+    final trueString = SimpleExpressions.get('true');
+    expect(trueString, same(SimpleExpressions.get(true)));
+    expect(trueString.evaluateValue({}), isTrue);
+
+    expect(SimpleExpressions.get(false), same(SimpleExpressions.get('false')));
+    expect(SimpleExpressions.get(true),
+        isNot(same(SimpleExpressions.get('True'))));
+  });
+
   test('rejects invalid mathematical operations', () {
     expect(() => parseExpression('div(1, 0)').evaluateValue({}),
         throwsA(predicate((error) => '$error'.contains('Division by zero'))));
@@ -334,14 +571,53 @@ void main() {
         throwsA(predicate((error) => '$error'.contains('Round precision'))));
     expect(
         () => parseExpression('round(1.2, #places)')
-            .evaluateValue({'places': 9007199254740992}),
-        throwsA(predicate(
-            (error) => '$error'.contains('non-negative safe integer'))));
+            .evaluateValue({'places': 309}),
+        throwsA(predicate((error) => '$error'.contains('too large'))));
     expect(() => parseExpression('min([])').evaluateValue({}),
         throwsA(predicate((error) => '$error'.contains('Min requires'))));
     expect(
         () => parseExpression('add(1)').evaluateValue({}),
         throwsA(
             predicate((error) => '$error'.contains('at least two arguments'))));
+  });
+
+  group('exception types', () {
+    test('reports parse failures as ExpressionParseException', () {
+      for (final expression in ['1e309', 'eq(1', 'match(#a, "(")']) {
+        expect(() => parseExpression(expression),
+            throwsA(isA<ExpressionParseException>()),
+            reason: expression);
+      }
+    });
+
+    test('reports runtime failures as ExpressionEvaluationException', () {
+      expect(() => parseExpression('num("x")').evaluateValue({}),
+          throwsA(isA<ExpressionEvaluationException>()));
+      expect(() => parseExpression('div(1, 0)').evaluateValue({}),
+          throwsA(isA<ExpressionEvaluationException>()));
+      expect(() => parseExpression('match("a", #p)').evaluateValue({'p': '('}),
+          throwsA(isA<ExpressionEvaluationException>()));
+    });
+
+    test('evaluates match input before the pattern', () {
+      expect(
+          () => parseExpression('match(num("x"), #p)').evaluateValue({'p': 1}),
+          throwsA(isA<ExpressionEvaluationException>()));
+    });
+
+    test('keeps the numeric arity prefix and ternary wording', () {
+      expect(
+          () => parseExpression('add(#v)').evaluateValue({'v': 5}),
+          throwsA(predicate((Object? e) => e.toString().contains(
+              'Invalid Expression: operator add expects at least two'))));
+      expect(
+          () => parseExpression('if(1)'),
+          throwsA(predicate(
+              (Object? e) => e.toString().contains('three arguments'))));
+    });
+
+    test('keeps unsupported input as ArgumentError', () {
+      expect(() => SimpleExpression(5), throwsArgumentError);
+    });
   });
 }

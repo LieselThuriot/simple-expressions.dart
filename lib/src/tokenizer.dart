@@ -35,7 +35,8 @@ class _Tokenizer {
   int get position => index;
 
   void next() {
-    while (index < source.length && source.codeUnitAt(index) <= 32) {
+    while (index < source.length &&
+        _isPortableWhitespace(source.codeUnitAt(index))) {
       index++;
     }
     if (index >= source.length) {
@@ -96,16 +97,12 @@ class _Tokenizer {
 
     _readDelimitedToken();
     final value = source.substring(start, index);
-    if (_numericPattern.hasMatch(value)) {
+    if (_decimalPattern.hasMatch(value)) {
       current = _Token(_TokenKind.number, value, index);
       return;
     }
     _fail('unexpected token $value');
   }
-
-  static final RegExp _numericPattern = RegExp(
-    r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$',
-  );
 
   void _readDelimitedToken() {
     while (index < source.length) {
@@ -115,7 +112,7 @@ class _Tokenizer {
           code == 0x2c || // ,
           code == 0x5b || // [
           code == 0x5d || // ]
-          code <= 32) {
+          _isPortableWhitespace(code)) {
         return;
       }
       index++;
