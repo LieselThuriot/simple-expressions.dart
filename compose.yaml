@@ -24,7 +24,7 @@ services:
     entrypoint: /bin/sh
     command:
       - -lc
-      - export PATH=/usr/lib/dart/bin:/root/.pub-cache/bin:$$PATH && dart pub global activate pana && pana .
+      - export PATH=/usr/lib/dart/bin:/root/.pub-cache/bin:$$PATH && dart pub global activate pana && pana --exit-code-threshold 0 .
 
   verify:
     image: dart:stable
@@ -37,5 +37,49 @@ services:
       - -lc
       - /usr/lib/dart/bin/dart pub get && /usr/lib/dart/bin/dart format . && /usr/lib/dart/bin/dart analyze && /usr/lib/dart/bin/dart test
 
+  pub-login:
+    image: dart:stable
+    working_dir: /app
+    volumes:
+      - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
+      - dart-pub-cache:/root/.pub-cache
+      - dart-publish-config:/root/.config/dart
+    entrypoint: /usr/lib/dart/bin/dart
+    command:
+      - pub
+      - login
+
+  publish-dry-run:
+    image: dart:stable
+    working_dir: /app
+    depends_on:
+      pana:
+        condition: service_completed_successfully
+    volumes:
+      - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
+      - dart-pub-cache:/root/.pub-cache
+      - dart-publish-config:/root/.config/dart
+    entrypoint: /usr/lib/dart/bin/dart
+    command:
+      - pub
+      - publish
+      - --dry-run
+
+  publish:
+    image: dart:stable
+    working_dir: /app
+    depends_on:
+      pana:
+        condition: service_completed_successfully
+    volumes:
+      - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
+      - dart-pub-cache:/root/.pub-cache
+      - dart-publish-config:/root/.config/dart
+    entrypoint: /usr/lib/dart/bin/dart
+    command:
+      - pub
+      - publish
+
 volumes:
   dart-pub-cache:
+  dart-publish-config:

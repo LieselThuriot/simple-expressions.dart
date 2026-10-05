@@ -153,7 +153,7 @@ To open a shell in the Dart container:
 docker compose run --rm shell
 ```
 
-To check the package's pub.dev score locally with Pana:
+To check the package's pub.dev score locally with Pana (the check fails unless the package receives every available point):
 
 ```bash
 docker compose run --rm pana
@@ -161,6 +161,37 @@ docker compose run --rm pana
 
 Pana is activated in the shared pub cache, so subsequent runs reuse the
 downloaded package.
+
+## Publishing
+
+Sign in to pub.dev with the Google account that has permission to publish this package:
+
+```bash
+docker compose run --rm pub-login
+```
+
+The command prints a sign-in URL because the browser is outside the container. Open that URL manually, approve access, then copy the browser's final `http://localhost:<port>?...` URL. Since the callback listener is inside the container, complete the sign-in from a second terminal while `pub-login` is still running:
+
+```bash
+docker ps --filter name=pub-login
+docker exec -it <container-id> curl 'http://localhost:<port>?...'
+```
+
+Use the exact callback URL from your browser in place of the example URL. The login command will finish and save credentials when the callback succeeds.
+
+Both publishing commands first run Pana and stop unless it reports the maximum score. Check what would be uploaded:
+
+```bash
+docker compose run --rm publish-dry-run
+```
+
+Before publishing, update the version in `pubspec.yaml` and add its release notes to `CHANGELOG.md`. Then publish; this runs pub.dev's interactive review and confirmation:
+
+```bash
+docker compose run --rm publish
+```
+
+The token is stored in the persistent `dart-publish-config` volume, separate from the shared package cache and the checkout. It remains available to later publishing runs; remove it with `docker compose down --volumes` when you want to clear it (this also removes the regular pub cache).
 
 When Dart is installed locally, the same commands can be run directly:
 
