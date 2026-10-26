@@ -100,7 +100,7 @@ Parsed evaluators and expression wrappers returned by `SimpleExpressions.get` ar
 
 ## Errors
 
-Parse-time failures (malformed syntax, unknown operators, non-finite literals, and invalid constant regex patterns) throw `ExpressionParseException`, which extends `FormatException`. Failures while evaluating a parsed expression (invalid numeric values, division by zero, invalid references, cyclic lists, and invalid model-supplied regex patterns) throw `ExpressionEvaluationException`, which extends `StateError`. Passing a value that is neither a string nor a Boolean throws an `ArgumentError`.
+Parse-time failures (malformed syntax, unknown operators, non-finite literals, invalid references, and invalid constant regex patterns) throw `ExpressionParseException`, which extends `FormatException`. Failures while evaluating a parsed expression (invalid numeric values, division by zero, cyclic lists, and invalid model-supplied regex patterns) throw `ExpressionEvaluationException`, which extends `StateError`. Passing a value that is neither a string nor a Boolean throws an `ArgumentError`.
 
 ## Security
 
