@@ -39,7 +39,7 @@ expression.evaluateValue(model);
 
 ## Example
 
-Run the package example:
+From a repository checkout, run the package example:
 
 ```bash
 dart run example/simple_expressions_example.dart
@@ -108,30 +108,58 @@ Expressions and regex patterns are trusted input. Regex evaluation can be vulner
 
 ## Development
 
-The repository includes a Docker Compose environment using the current
-`dart:stable` image. From this directory, run the complete development check
-with:
+The development and publishing commands below are run from the root of a
+repository checkout. Initialize the shared test fixtures first:
 
 ```bash
-docker compose run --rm verify
+git submodule update --init --recursive
 ```
 
-The source mount is configured through the untracked `.env` file because the
-Docker daemon runs in Linux. Create it from `.env.example` and set
-`DART_PROJECT_PATH` to the Linux path for this checkout:
+### Local Dart SDK
+
+Use the current stable Dart SDK for development. The library supports Dart
+3.0+, but the repository's `lints` development dependency requires Dart 3.8
+or later.
+
+```bash
+dart pub get
+dart format .
+dart analyze
+dart test
+```
+
+### Docker Compose
+
+The repository includes a Compose environment using `dart:stable` and host
+networking. Use Docker Engine on Linux, or enable host networking in a
+supported Docker Desktop installation (4.34 or later).
+
+Create the untracked `.env` file from the repository's `.env.example`:
 
 ```bash
 cp .env.example .env
 ```
 
-For this checkout, the value is:
+Set `DART_PROJECT_PATH` to the absolute checkout path accessible to your
+Docker daemon. For example, on a Linux host:
 
 ```dotenv
-DART_PROJECT_PATH=/mnt/c/Git/SimplEx/simple_expressions_dart
+DART_PROJECT_PATH=/home/you/projects/simple_expressions_dart
 ```
 
-To use a different checkout location, update `.env` or override the variable
-before running Compose. For example, in PowerShell:
+With a Docker daemon running in WSL, a checkout on the Windows C: drive may
+instead use `/mnt/c/path/to/simple_expressions_dart`. Choose the path for
+your Docker environment.
+
+Once the mount is configured, run the complete development check:
+
+```bash
+docker compose run --rm verify
+```
+
+This installs dependencies, formats the checkout, runs analysis, and runs
+the tests. You can also override the path for a command; for example, from
+PowerShell when using a WSL-hosted daemon:
 
 ```powershell
 $env:DART_PROJECT_PATH = '/mnt/c/path/to/simple_expressions_dart'
@@ -170,7 +198,7 @@ Sign in to pub.dev with the Google account that has permission to publish this p
 docker compose run --rm pub-login
 ```
 
-The command prints a sign-in URL because the browser is outside the container. Open that URL manually, approve access, then copy the browser's final `http://localhost:<port>?...` URL. Since the callback listener is inside the container, complete the sign-in from a second terminal while `pub-login` is still running:
+Open the sign-in URL printed by the command and approve access. With host networking, the browser may be able to reach the callback directly. If it cannot reach the callback listener, copy the browser's final `http://localhost:<port>?...` URL and request it inside the running container from a second terminal:
 
 ```bash
 docker ps --filter name=pub-login
@@ -193,15 +221,6 @@ docker compose run --rm publish
 
 The token is stored in the persistent `dart-publish-config` volume, separate from the shared package cache and the checkout. It remains available to later publishing runs; remove it with `docker compose down --volumes` when you want to clear it (this also removes the regular pub cache).
 
-When Dart is installed locally, the same commands can be run directly:
-
-```bash
-dart pub get
-dart format .
-dart analyze
-dart test
-```
-
 ## Conformance
 
-This package supports conformance specification v1. The pinned corpus is documented in `CONFORMANCE.md` and initialized at `test/fixtures/conformance`.
+This package supports conformance specification v1. See [CONFORMANCE.md](https://github.com/LieselThuriot/simple-expressions.dart/blob/master/CONFORMANCE.md) for compatibility details. The repository pins the corpus at `test/fixtures/conformance/`.
