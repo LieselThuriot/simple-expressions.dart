@@ -1,6 +1,7 @@
 services:
   dart:
     image: dart:stable
+    network_mode: host
     working_dir: /app
     volumes:
       - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
@@ -9,6 +10,7 @@ services:
 
   shell:
     image: dart:stable
+    network_mode: host
     working_dir: /app
     volumes:
       - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
@@ -17,6 +19,7 @@ services:
 
   pana:
     image: dart:stable
+    network_mode: host
     working_dir: /app
     volumes:
       - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
@@ -28,6 +31,7 @@ services:
 
   verify:
     image: dart:stable
+    network_mode: host
     working_dir: /app
     volumes:
       - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
@@ -39,6 +43,7 @@ services:
 
   pub-login:
     image: dart:stable
+    network_mode: host
     working_dir: /app
     volumes:
       - ${DART_PROJECT_PATH:?Set DART_PROJECT_PATH in .env}:/app
@@ -51,6 +56,7 @@ services:
 
   publish-dry-run:
     image: dart:stable
+    network_mode: host
     working_dir: /app
     depends_on:
       pana:
@@ -67,6 +73,7 @@ services:
 
   publish:
     image: dart:stable
+    network_mode: host
     working_dir: /app
     depends_on:
       pana:
