@@ -58,13 +58,14 @@ _Value _round(_Value value, _Value decimals) {
   final places = placesValue.toInt();
   if (number == 0) return _zeroValue;
 
-  final data = ByteData(8)..setFloat64(0, number.abs());
-  final bits = data.getUint64(0);
-  final exponentBits = (bits >> 52) & 0x7ff;
-  final fraction = bits & 0x000fffffffffffff;
-  final significand = exponentBits == 0
-      ? BigInt.from(fraction)
-      : BigInt.from(0x0010000000000000 | fraction);
+  final data = ByteData(8)..setFloat64(0, number.abs(), Endian.big);
+  // The JavaScript backend supports 32-bit accessors, but not getUint64.
+  final high = data.getUint32(0, Endian.big);
+  final low = data.getUint32(4, Endian.big);
+  final exponentBits = (high >> 20) & 0x7ff;
+  final fraction = (BigInt.from(high & 0xfffff) << 32) | BigInt.from(low);
+  final significand =
+      exponentBits == 0 ? fraction : (BigInt.one << 52) | fraction;
   final binaryExponent = exponentBits == 0 ? -1074 : exponentBits - 1023 - 52;
   final numerator = significand * BigInt.from(5).pow(places);
   final shift = binaryExponent + places;

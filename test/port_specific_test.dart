@@ -420,33 +420,62 @@ void main() {
     );
   });
 
-  test('supports round, power, and clamp', () {
-    expect(parseExpression('round(12.345, 2)').evaluateValue({}), 12.35);
-    expect(parseExpression('round(-12.345, 2)').evaluateValue({}), -12.35);
-    expect(parseExpression('round(1.005, 2)').evaluateValue({}), 1.0);
-    expect(parseExpression('round(-1.005, 2)').evaluateValue({}), -1.0);
-    expect(
-        parseExpression('round(1.0049999999999997, 2)').evaluateValue({}), 1.0);
-    expect(parseExpression('round(1.0050000000000001, 2)').evaluateValue({}),
-        1.01);
-    expect(
-        parseExpression('round(7.164692098702749e-215, 230)').evaluateValue({}),
-        7.164692098702749e-215);
-    expect(
-        parseExpression('round(4.898568327955125e-190, 204)').evaluateValue({}),
-        4.89856832795512e-190);
-    expect(
-        parseExpression('round(6.663776354903525e-38, 52)').evaluateValue({}),
-        6.66377635490352e-38);
-    expect(parseExpression('round(1e308, 308)').evaluateValue({}), 1e308);
-    expect(parseExpression('round(5e-324, 308)').evaluateValue({}), 0.0);
-    expect(parseExpression('round(1.25, "308")').evaluateValue({}), 1.25);
+  group('rounding', () {
+    final cases = <String, double>{
+      'round(0, 0)': 0.0,
+      'round(-0, 308)': 0.0,
+      'round(-0.4, 0)': 0.0,
+      'round(0.5, 0)': 1.0,
+      'round(-0.5, 0)': -1.0,
+      'round(2.5, 0)': 3.0,
+      'round(-2.5, 0)': -3.0,
+      'round(1.25, 1)': 1.3,
+      'round(-1.25, 1)': -1.3,
+      'round(12.345, 2)': 12.35,
+      'round(-12.345, 2)': -12.35,
+      'round(1.005, 2)': 1.0,
+      'round(-1.005, 2)': -1.0,
+      'round(1.0049999999999997, 2)': 1.0,
+      'round(1.0050000000000001, 2)': 1.01,
+      'round(1.0000000000000002, 16)': 1.0000000000000002,
+      'round(7.164692098702749e-215, 230)': 7.164692098702749e-215,
+      'round(4.898568327955125e-190, 204)': 4.89856832795512e-190,
+      'round(6.663776354903525e-38, 52)': 6.66377635490352e-38,
+      'round(5e-324, 308)': 0.0,
+      'round(-5e-324, 308)': 0.0,
+      'round(2.225073858507201e-308, 308)': 2e-308,
+      'round(-2.225073858507201e-308, 308)': -2e-308,
+      'round(1e308, 0)': 1e308,
+      'round(1e308, 308)': 1e308,
+      'round(-1e308, 308)': -1e308,
+      'round(1.7976931348623157e308, 308)': 1.7976931348623157e308,
+      'round(1.25, "308")': 1.25,
+    };
+
+    for (final entry in cases.entries) {
+      test(entry.key, () {
+        final result = parseExpression(entry.key).evaluateValue({}) as double;
+        expect(result, entry.value);
+        if (entry.value == 0) expect(result.isNegative, isFalse);
+      });
+    }
+
+    test('rounds live model values without losing low fraction bits', () {
+      final expression = parseExpression('round(#value, #precision)');
+      final model = <String, Object?>{'value': 1.005, 'precision': 2};
+      expect(expression.evaluateValue(model), 1.0);
+      model['value'] = 1.0050000000000001;
+      expect(expression.evaluateValue(model), 1.01);
+    });
+  });
+
+  test('supports power and clamp', () {
     expect(parseExpression('pow(2, 3)').evaluateValue({}), 8.0);
     expect(parseExpression('clamp(12, 0, 10)').evaluateValue({}), 10.0);
   });
 
   test('numeric results normalize negative zero', () {
-    for (final expression in ['round(-0.4, 0)', 'mul(-1, 0)', 'ceil(-0.5)']) {
+    for (final expression in ['mul(-1, 0)', 'ceil(-0.5)']) {
       final result = parseExpression(expression).evaluateValue({}) as double;
       expect(result, 0.0, reason: expression);
       expect(result.isNegative, isFalse, reason: expression);
@@ -463,13 +492,6 @@ void main() {
         parseExpression('#value').evaluateValue({'value': nestedMap}) as Map;
     expect(identical(returnedMap, nestedMap), isTrue);
     expect((returnedMap['number'] as double).isNegative, isTrue);
-  });
-
-  test('rounds decimal ties away from zero', () {
-    expect(parseExpression('round(0.5, 0)').evaluateValue({}), 1.0);
-    expect(parseExpression('round(-0.5, 0)').evaluateValue({}), -1.0);
-    expect(parseExpression('round(2.5, 0)').evaluateValue({}), 3.0);
-    expect(parseExpression('round(-2.5, 0)').evaluateValue({}), -3.0);
   });
 
   test('uses signed remainder and rejects invalid results', () {
